@@ -1,0 +1,703 @@
+---
+title: "Titanic"
+author: "Nicole Lai"
+date: "04/01/2021"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introduction
+
+
+
+```{r}
+# Loading packages
+library(tidyverse)
+library(visdat)
+library(car)
+library(MASS)
+library(randomForest)
+library(knitr)
+```
+
+
+```{r}
+train <- read_csv("~/Documents/Projects/Titanic/train.csv")
+test <- read_csv("~/Documents/Projects/Titanic/test.csv")
+gender_submission <- read_csv("~/Documents/Projects/Titanic/gender_submission.csv") %>% data.frame()
+```
+
+## Data Dictionary
+
+**Variable Name** | Descriptions
+------------------|-------------------------------------
+**Survive**       | Survival: 0 = No, 1 = Yes
+**Pclass**        | Ticket class; 1 = 1st, 2 = 2nd, 3 = 3rd
+**Sex**           | Sex
+**Age**           | Age in years
+**Sibsp**         | # of siblings / spouses aboard the Titanic
+**Parch**         | # of parents / children aboard the Titanic
+**Ticket**        | Ticket number
+**Fare**          | Passenger fare
+**Cabin**         | Cabin number
+**Embarked**      | Port of Embarkation; C = Cherbourg, Q = Queenstown, S = Southampton
+
+## Overview of the Dataset
+
+```{r}
+# Explore the data types and the percentage of missing value
+vis_dat(train)
+vis_miss(train)
+```
+
+- There are two **types of variable** in the raw dataset, including **Categorical** and **Numeric**.
+
+  - **Categorical variables** include Name, Sex, Ticket, Cabin and Embarked.
+
+  - **Numerical variables** include Age & Fare (continuous), and PassengerId, Survived, Pclass, SibSp & Parch (discrete).
+
+- Some of the variable types does not make sense in this case. Thus, we have to do some type transformation before exploring the relationship between each variable and survived.
+
+- From the second graph, we can also know that Cabin is the variable with largest amount of missing value. Then followed by Age and Embarked. Since **Cabin** contains 77.1% of the missing value, it is not that reasonable to analyze the relationship between cabin and survive in this case. We may **drop/ignore** this variable. As for Age, since it contains nearly 20% of the missing values, we may try to impute those NAs later.
+
+
+```{r}
+# Type transformation
+
+# Convert Survivied and Pclass into categorical variable
+# Convert Sex, Cabin and Embarked to factor
+clean_data <- train %>% data.frame()
+clean_data$Survived <- factor(clean_data$Survived)
+clean_data$Pclass <- factor(clean_data$Pclass)
+clean_data$Sex <- factor(clean_data$Sex)
+clean_data$Cabin <- factor(clean_data$Cabin)
+clean_data$Embarked <- factor(clean_data$Embarked)
+```
+
+## Summary of the dataset
+
+```{r}
+# Summary of the dataset
+head(clean_data)
+summary(clean_data)
+```
+
+**Categorical variable**
+
+- **Survived:** In this sample dataset, there are 891 observations. Among them, 549 did not survive while 342 survived. The survival rate of this sample is 38.38%. 
+
+- **Pclass:** There were 3 ticket classes. Within this sample, 216 of the observations were from the first class, 184 of the observations were from the second class. 491 of the observations were from the third class. 
+
+- **Name:** This variable is a bit mess at this stage. Title information may be useful in further analysis and can be extracted.
+
+- **Sex:** 314 of the observations in this sample were female and 577 of them were male.
+
+- **Ticket:** Contains letters and numbers. Based on our common sense, it may not affect the survival. Thus can be **dropped**.
+
+- **Embarked:** 168 of the observations departed from Cherbourg. 77 of the observations departed from Queenstown. 644 of the observations departed from Southampton. There are two observations whose port of embarkation did not be recorded.
+
+
+**Numerical variable**
+
+- **PassengerId:** A sequence of numbers, may not bring much information about the survival. According to common sense, it can be dropped. But this can be confirmed later.
+
+- **Age:** The youngest observation in this sample was 0.42 years old. The oldest observation was 80 years old. The median of age is 28. May need to check whether there are some outliers in this variable.
+
+- **SibSp:** 8 is the maximum amount of siblings / spouses that the observations in this sample travelled with. On average, each of them would travel with 0.523 siblings / spouses.
+
+- **Parch:** 6 is maximum amount of parents / children that an observation had aboard the Titanic. At 3 quarters of them did not go with parents or children. On average, each observation may travel with 0.3816 children or parents.
+
+- **Fare:** The minimum fare is 0 in this sample, while the maximum fare is 512.33. The median of the fare is 14.45. May need to check whether there are some outliers in this variable.
+
+```{r}
+# Check whether Age contains some outliers
+clean_data %>% ggplot(aes(x = Age, y = ..density..)) + 
+  geom_histogram(fill = "lavender") + 
+  geom_density(colour = "mediumpurple4") + 
+  ggtitle("Distribution of Age") +
+  theme_bw()
+```
+
+This seems reasonable. Most of the observations are young adults.
+
+```{r}
+# Check whether Fare contains some outliers
+clean_data %>% ggplot(aes(x = Fare)) + 
+  geom_histogram(fill = "lavender") +
+  geom_histogram(data=subset(clean_data,clean_data$Fare == 
+                               max(clean_data$Fare)), fill="mediumpurple4") +
+  ggtitle("Distribution of Fare") +
+  theme_bw()
+```
+
+There are few observations with fare greater than 500. All the others are below 300. 
+
+```{r}
+# More details about those had the maximum fare
+max_fare <- clean_data %>% filter(clean_data$Fare == max(clean_data$Fare)) %>% data.frame()
+max_fare %>% kable()
+```
+
+It seems that these may be considered as outliers.
+
+# Relationship Exploration
+
+```{r}
+# Relationship overview
+plot(clean_data, col = clean_data$Survived)
+```
+
+Hard to figure out the relationship.
+
+We can explore the one-to-one relationship between each variable and Survival. For **Categorical variable**, we can visualize them by using **Bar Charts**. For **Numerical variable**, we can visualize them by using **Histograms**.
+
+## Categorical vs Survival
+
+```{r}
+# Pclass
+ggplot(clean_data[1:891,], aes(x = Pclass, fill = Survived)) + 
+  geom_bar(stat = "count", position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  ggtitle("Pclass vs Survival") +
+  theme_bw()
+```
+
+There is a relationship between ticket classes and survival. People from the first class were more likely to survive, while people from the third class were less likely to survive.
+
+```{r}
+# Sex
+ggplot(clean_data[1:891,], aes(x = Sex, fill = Survived)) + 
+  geom_bar(stat = "count", position = "fill") +
+  scale_fill_brewer(palette = "Oranges") +
+  ggtitle("Sex vs Survival") +
+  theme_bw()
+```
+
+Sex may also influence the survival. Female were more likely to survive then male in this disaster.
+
+```{r}
+# Embarked
+ggplot(clean_data[1:891,], aes(x = Embarked, fill = Survived)) + 
+  geom_bar(stat = "count", position = "fill") +
+  scale_fill_brewer(palette = "Spectral") +
+  ggtitle("Embarked vs Survival") +
+  theme_bw()
+```
+
+It seems that port of embarkation may influence the survival as well. More than 50% of the people departed from Cherbourg survived. However, people departed from Queenstown and Southampton had smaller survival rate, with around 38% and 35% respectively. 
+
+
+```{r}
+# Extract title information from variable "Name"
+clean_data <- clean_data %>% mutate(Title = str_extract(clean_data$Name, '([A-Za-z]+)\\.'))
+table(clean_data$Title)
+```
+
+```{r}
+clean_data$Title <- recode(clean_data$Title, 
+                           "c('Don.', 'Rev.', 'Dr.', 'Major.', 
+                           'Lady.','Sir.', 'Col.', 'Capt.', 'Countess.', 'Jonkheer.') = 'Rare'")
+clean_data$Title <- recode(clean_data$Title, "'Mme.' = 'Mrs.'")
+clean_data$Title <- recode(clean_data$Title, "'Ms.' = 'Miss.'")
+clean_data$Title <- recode(clean_data$Title, "'Mlle.' = 'Miss.'")
+clean_data$Title <- as.factor(clean_data$Title)
+```
+
+```{r}
+# Title
+ggplot(clean_data[1:891,], aes(x = Title, fill = Survived)) + 
+  geom_bar(stat = "count", position = "fill") +
+  scale_fill_brewer(palette = "RdPu") +
+  ggtitle("Title vs Survival") +
+  theme_bw()
+```
+
+Title may affect the survival.
+
+## Numerical vs Survival
+
+```{r}
+# PassengerId
+ggplot(clean_data[1:891,], aes(x = PassengerId, fill = Survived)) + 
+  geom_histogram(binwidth = 3, position = "fill") +
+  scale_fill_brewer(palette = "BuPu") +
+  ggtitle("PassengerId vs Survival") +
+  theme_bw()
+```
+
+It is obvious that there is no pattern in this graph. Thus we may conclude that PassengerId may not influence survival. **PassengerId** can be dropped in further analysis.
+
+```{r}
+# Age
+ggplot(clean_data[1:891,], aes(x = Age, fill = Survived)) + 
+  geom_histogram(binwidth = 3, position = "fill") +
+  scale_fill_brewer(palette = "Purples") +
+  ggtitle("Age vs Survival") +
+  theme_bw()
+```
+
+Relationship exists. Young people whose age is below 20 were more likely to survive.
+
+```{r}
+# SibSp
+ggplot(clean_data[1:891,], aes(x = SibSp, fill = Survived)) + 
+  geom_histogram(position = "fill") +
+  scale_fill_brewer(palette = "Greens") +
+  ggtitle("SibSp vs Survival") +
+  theme_bw()
+```
+
+```{r}
+# Parch
+ggplot(clean_data[1:891,], aes(x = Parch, fill = Survived)) + 
+  geom_histogram(position = "fill") +
+  scale_fill_brewer(palette = "Reds") +
+  ggtitle("Parch vs Survival") +
+  theme_bw()
+```
+
+It seems SibSp has similar effects as Parch which is people had fewer relatives were more likely to survive. Thus, we may combine these two variables and create a new variable "Family"
+
+```{r}
+# Combine SibSp and Parch to create variable Family 
+clean_data <- clean_data %>% mutate(Family = SibSp + Parch + 1)
+```
+
+```{r}
+# Fare
+ggplot(clean_data[1:891,], aes(x = Fare, fill = Survived)) + 
+  geom_histogram(position = "fill") +
+  scale_fill_brewer(palette = "YlGn") +
+  ggtitle("Fare vs Survival") +
+  theme_bw()
+```
+
+It seems that passengers who paid for higher fare (greater than 100) were more likely to survive.
+
+## Interaction between variables
+
+```{r}
+# Interaction between Sex and Pclass
+ggplot(clean_data[1:891,], aes(x = Pclass, fill = Survived)) + 
+  geom_bar(stat = "count", position = "fill") +
+  facet_grid(~Sex) + 
+  ggtitle("Pclass & Sex vs Survival") +
+  scale_fill_brewer(palette = "Blues") +
+  theme_bw()
+```
+
+No matter in which class, female were still more likely to survive than male.
+
+```{r}
+ggplot(clean_data[1:891,], aes(x = Age, y = ..density.., fill = Survived)) + 
+  geom_histogram(binwidth = 3, position = "dodge") +
+  facet_grid(~Pclass) + 
+  geom_density() +
+  ggtitle("Age & Pclass vs Survival") +
+  scale_fill_brewer(palette = "Pastel1") +
+  theme_bw()
+```
+
+In first class, passengers who were less than 40 years old had higher survival rate. However, for class 2 and class 3, survival rates were higher for passengers younger than 20 years old. Thus, may consider the **interaction between Age and Pclass** when constructing the model.
+
+```{r}
+ggplot(clean_data[1:891,], aes(x = Age, y = ..density.., fill = Survived)) + 
+  geom_histogram(binwidth = 3, position = "dodge") +
+  geom_density() +
+  facet_grid(~Sex) + 
+  ggtitle("Age & Sex vs Survival") +
+  scale_fill_brewer(palette = "Pastel2") +
+  theme_bw()
+```
+
+From these graphs, we can see that interaction exists between sex and age. It seems that male had higher survival rate if they were less than 15 years old. Thus, **interaction between Sex and Age** can be considered when doing further ananlysis. 
+
+```{r}
+ggplot(clean_data[1:891,], aes(x = Age, y = ..density.., fill = Survived)) + 
+  geom_histogram(binwidth = 3, position = "dodge") +
+  geom_density() +
+  facet_grid(~Embarked) + 
+  ggtitle("Age & Embarked vs Survival") +
+  scale_fill_brewer(palette = "Paired") +
+  theme_bw()
+```
+
+It seems that the partterns are a little bit different for different Embarked. Thus the interaction between age and embarked be considered.
+
+```{r}
+ggplot(clean_data[1:891,], aes(x = Fare, y = ..density.., fill = Survived)) + 
+  geom_histogram(position = "dodge") +
+  geom_density() +
+  facet_grid(~Pclass) + 
+  ggtitle("Fare & Pclass vs Survival") +  
+  scale_fill_brewer(palette = "Accent") +
+  theme_bw()
+```
+
+Interaction may also exists between Fare and Pclass. For first class, passengers were likely to survive if they paid more than 50 while for class 2, passengers paid 5 to 50 were more likely to survive. Passengers from class 3 paid 1 to 15 had higher survival rate. Thus, **interaction between Fare and Pclass** can be considered.
+
+## Conclusion for Relationship Exploration
+
+Most variables in this dataset had influence on survival. These include:
+
+**Categorical:** Pclass, Sex, Embarked, Title
+
+**Numerical:** Age, Family, Fare
+
+Interaction between these variables may be considered as well.
+
+# Data Wrangling
+
+## Training set
+
+```{r}
+# Drop those unused variables
+drops <- c("PassengerId", "Cabin", "SibSp", "Parch", "Name", "Ticket")
+clean_data <- clean_data[ , !(names(clean_data) %in% drops)]
+```
+
+Since there were still 2 missing values in variable embarked, we may consider impute the variable age by using information from those related variables. In this way, we may use the median of age from different combination of class and sex.
+
+```{r}
+# Complete the variables with missing values
+
+# For Age
+
+# When sex == female and class == 1
+Female_1 <- clean_data[clean_data$Pclass == "1" & clean_data$Sex == "female", ]$Age %>%  
+  na.omit() %>% data.frame()
+Female_1 <- median(Female_1[, 1])
+
+clean_data[clean_data$Pclass == "1" & clean_data$Sex == "female" & clean_data$Age %in% NA, 'Age'] <- Female_1
+
+# When sex == female and class == 2
+Female_2 <- clean_data[clean_data$Pclass == "2" & clean_data$Sex == "female", ]$Age %>%
+  na.omit() %>% data.frame()
+Female_2 <- median(Female_2[, 1])
+
+clean_data[clean_data$Pclass == "2" & clean_data$Sex == "female" & clean_data$Age %in% NA, 'Age'] <- Female_2
+
+# When sex == female and class == 3
+Female_3 <- clean_data[clean_data$Pclass == "3" & clean_data$Sex == "female", ]$Age %>%
+  na.omit() %>% data.frame()
+Female_3 <- median(Female_3[, 1])
+
+clean_data[clean_data$Pclass == '3' & clean_data$Sex == "female" & clean_data$Age %in% NA, 'Age'] <- Female_3
+
+# When sex == male and class == 1
+Male_1 <- clean_data[clean_data$Pclass == "1" & clean_data$Sex == "male", ]$Age %>%
+  na.omit() %>% data.frame()
+Male_1 <- median(Male_1[, 1])
+
+clean_data[clean_data$Pclass == "1" & clean_data$Sex == "male" & clean_data$Age %in% NA, 'Age'] <- Male_1
+
+# When sex == male and class == 2
+Male_2 <- clean_data[clean_data$Pclass == "2" & clean_data$Sex == "male", ]$Age %>%
+  na.omit() %>% data.frame()
+Male_2 <- median(Male_2[, 1])
+
+clean_data[clean_data$Pclass == "2" & clean_data$Sex == "male" & clean_data$Age %in% NA, 'Age'] <- Male_2
+
+# When sex == male and class == 3
+Male_3 <- clean_data[clean_data$Pclass == "3" & clean_data$Sex == "male", ]$Age %>%
+  na.omit() %>% data.frame()
+Male_3 <- median(Male_3[, 1])
+
+clean_data[clean_data$Pclass == "3" & clean_data$Sex == "male" & clean_data$Age %in% NA, 'Age'] <- Male_3
+```
+
+Since there are only two missing value, we can just fill them with the mode. 
+
+```{r}
+# For embarked
+
+# Find the mode
+table(clean_data$Embarked)
+```
+
+```{r}
+clean_data[clean_data$Embarked %in% NA, 'Embarked'] <- 'S'
+```
+
+## Test set
+
+```{r}
+gender_submission$Survived <- as.factor(gender_submission$Survived)
+```
+
+```{r}
+clean_test <- test %>% data.frame()
+
+# Types transformation
+clean_test$Pclass <- factor(clean_test$Pclass)
+clean_test$Sex <- factor(clean_test$Sex)
+clean_test$Embarked <- factor(clean_test$Embarked)
+
+# Create Title variable
+clean_test <- clean_test %>% mutate(Title = str_extract(test$Name, '([A-Za-z]+)\\.'))
+clean_test$Title <- recode(clean_test$Title, 
+                           "c('Dona.', 'Dr.', 'Rev.', 'Col.') = 'Rare'")
+clean_test$Title <- recode(clean_test$Title, "'Ms.' = 'Miss.'")
+
+clean_test$Title <- as.factor(clean_test$Title)
+
+# Create Family variable
+clean_test <- clean_test %>% mutate(Family = SibSp + Parch + 1)
+```
+
+```{r}
+# Drop unused variables
+drops_test <- c("SibSp", "Parch", "Cabin", "Ticket", "Name")
+clean_test <- clean_test[ , !(names(clean_test) %in% drops_test)]
+```
+
+```{r}
+summary(clean_test)
+```
+
+```{r}
+# Impute missing values
+
+# When sex == female and class == 1
+Test_Female_1 <- clean_test[clean_test$Pclass == "1" & clean_test$Sex == "female", ]$Age %>%
+  na.omit() %>% data.frame()
+Test_Female_1 <- median(Test_Female_1[, 1])
+
+clean_test[clean_test$Pclass == "1" & clean_test$Sex == "female" & clean_test$Age %in% NA, 'Age'] <- Test_Female_1
+
+# When sex == female and class == 2
+Test_Female_2 <- clean_test[clean_test$Pclass == "2" & clean_test$Sex == "female", ]$Age %>%
+  na.omit() %>% data.frame()
+Test_Female_2 <- median(Test_Female_2[, 1])
+
+clean_test[clean_test$Pclass == "2" & clean_test$Sex == "female" & clean_test$Age %in% NA, 'Age'] <- Test_Female_2
+
+# When sex == female and class == 3
+Test_Female_3 <- clean_test[clean_test$Pclass == "3" & clean_test$Sex == "female", ]$Age %>%
+  na.omit() %>% data.frame()
+Test_Female_3 <- median(Test_Female_3[, 1])
+
+clean_test[clean_test$Pclass == '3' & clean_test$Sex == "female" & clean_test$Age %in% NA, 'Age'] <- Test_Female_3
+
+# When sex == male and class == 1
+Test_Male_1 <- clean_test[clean_test$Pclass == "1" & clean_test$Sex == "male", ]$Age %>%
+  na.omit() %>% data.frame()
+Test_Male_1 <- median(Test_Male_1[, 1])
+
+clean_test[clean_test$Pclass == "1" & clean_test$Sex == "male" & clean_test$Age %in% NA, 'Age'] <-Test_Male_1
+
+# When sex == male and class == 2
+Test_Male_2 <- clean_test[clean_test$Pclass == "2" & clean_test$Sex == "male", ]$Age %>%
+  na.omit() %>% data.frame()
+Test_Male_2 <- median(Test_Male_2[, 1])
+
+clean_test[clean_test$Pclass == "2" & clean_test$Sex == "male" & clean_test$Age %in% NA, 'Age'] <- Male_2
+
+# When sex == male and class == 3
+Test_Male_3 <- clean_test[clean_test$Pclass == "3" & clean_test$Sex == "male", ]$Age %>%
+  na.omit() %>% data.frame()
+Test_Male_3 <- median(Test_Male_3[, 1])
+
+clean_test[clean_test$Pclass == "3" & clean_test$Sex == "male" & clean_test$Age %in% NA, 'Age'] <- Test_Male_3
+```
+
+```{r}
+# Impute the only missing value with the mean
+clean_test[clean_test$Fare %in% NA, 'Fare'] <- mean(na.omit(clean_test$Fare))
+```
+
+
+# Modelling and Prediction
+
+## Logistic Model
+
+```{r}
+# CV errors of Logistic Model with main effects
+
+n <- dim(clean_data)[1]
+CVLog <- 0
+for (i in 1:n) {
+  logistic <- glm(Survived~., data = clean_data[-i,], family = binomial(link = "logit"))
+  glmprobs <- predict(logistic, newdata = clean_data[i,], type = "response")
+  glmpred <- ifelse(glmprobs > 0.5, 1, 0)
+  CVLog <- CVLog + sum(glmpred != clean_data[i,1])
+}
+
+data.frame(CVLog/n) %>% kable(col.names = NULL, caption = "LogMain")
+```
+
+
+```{r}
+# CV errors of Logistic Model with some interactions
+CVLoginter <- 0
+for (i in 1:n) {
+  logistic_inter <- glm(Survived~ Pclass + Sex + Age + Fare + Embarked + Title + Family + Age*Sex*Pclass + Fare*Pclass, data = clean_data[-i,], family = binomial(link = "logit"))
+  glminterprobs <- predict(logistic_inter, newdata = clean_data[i,], type = "response")
+  glminterpred <- ifelse(glminterprobs > 0.5, 1, 0)
+  CVLoginter <- CVLoginter + sum(glminterpred != clean_data[i,1])
+}
+
+data.frame(CVLoginter/n) %>% kable(col.names = NULL, caption = "LogInter1")
+```
+
+```{r}
+# CV errors of Logistic Model with some interactions
+CVLoginter <- 0
+for (i in 1:n) {
+  logistic_inter <- glm(Survived~ Pclass + Sex + Age + Fare + Embarked + Title + Family + Age*Sex*Pclass, data = clean_data[-i,], family = binomial(link = "logit"))
+  glminterprobs <- predict(logistic_inter, newdata = clean_data[i,], type = "response")
+  glminterpred <- ifelse(glminterprobs > 0.5, 1, 0)
+  CVLoginter <- CVLoginter + sum(glminterpred != clean_data[i,1])
+}
+
+data.frame(CVLoginter/n) %>% kable(col.names = NULL, caption = "LogInter2")
+```
+
+It seems that the third logistic model is a bit better than the first two in the training set.
+
+### Apply to the test set 
+
+```{r}
+logistic_inter <- glm(Survived~., data = clean_data, family = binomial(link = "logit"))
+
+glminterprobs <- predict(logistic_inter, newdata = clean_test[,], type = "response")
+glminterpred <- ifelse(glminterprobs > 0.5, 1, 0)
+
+table(glminterpred, gender_submission$Survived)
+```
+
+```{r}
+n_test <- dim(clean_test)[1]
+LogMainTest <- (24 + 9)/n_test
+data.frame(LogMainTest) %>% kable(col.names = NULL, caption = "LogMainTest")
+```
+
+```{r}
+logistic_inter <- glm(Survived~ Pclass + Sex + Age + Fare + Embarked + Title + Family + Age*Sex*Pclass + Fare*Pclass, data = clean_data, family = binomial(link = "logit"))
+
+glminterprobs <- predict(logistic_inter, newdata = clean_test[,], type = "response")
+glminterpred <- ifelse(glminterprobs > 0.5, 1, 0)
+
+table(glminterpred, gender_submission$Survived)
+```
+
+```{r}
+LogInterTest <- (24 + 19)/n_test
+data.frame(LogInterTest) %>% kable(col.names = NULL, caption = "LogInterTest1")
+```
+
+```{r}
+logistic_inter <- glm(Survived~ Pclass + Sex + Age + Fare + Embarked + Title + Family + Age*Sex*Pclass, data = clean_data, family = binomial(link = "logit"))
+
+glminterprobs <- predict(logistic_inter, newdata = clean_test[,], type = "response")
+glminterpred <- ifelse(glminterprobs > 0.5, 1, 0)
+
+table(glminterpred, gender_submission$Survived)
+```
+
+```{r}
+LogInterTest2 <- (25 + 18)/n_test
+data.frame(LogInterTest2) %>% kable(col.names = NULL, caption = "LogInterTest2")
+```
+
+When apply to the test set, it seems that the first logistic model (model only include the main effects or model without any interaction) is the best logistic model.
+
+## LDA
+
+```{r}
+# CV errors of LDA
+CVlda <- 0
+for (i in 1:n) {
+  LDA <- lda(Survived~., data = clean_data[-i,])
+  LDApred <- predict(LDA, newdata = clean_data[i,])$class
+  CVlda <- CVlda + sum(LDApred != clean_data[i,1])
+}
+
+data.frame(CVlda/n) %>% kable(col.names = NULL, caption = "LDACV")
+```
+
+### Apply to test set
+
+```{r}
+LDA <- lda(Survived~., data = clean_data)
+LDApred <- predict(LDA, newdata = clean_test[,])$class
+table(LDApred, gender_submission$Survived)
+```
+
+```{r}
+LDATest <- (4 + 16)/n_test
+data.frame(LDATest) %>% kable(col.names = NULL, caption = "LDATest")
+```
+
+## Radom Forest
+
+```{r}
+set.seed(12121021)
+m.rf <- randomForest(formula = Survived~., data = clean_data, importance = TRUE)
+OOBpred <- predict(m.rf)
+
+# Random Forest Out-of-Bag Errors
+data.frame(sum(OOBpred != clean_data$Survived)/n) %>% kable(col.names = NULL, caption = "RFOOB")
+```
+
+```{r}
+# Importance of the variables
+varImpPlot(m.rf)
+```
+
+### Apply to the test set
+
+```{r}
+pred_test <- predict(m.rf, clean_test)
+RFTest <- sum(pred_test != gender_submission$Survived)/n_test
+data.frame(RFTest) %>% kable(col.names = NULL, caption = "RFTest")
+```
+
+# Conclusion
+
+```{r}
+data.frame(LDATest, LogMainTest, LogInterTest, LogInterTest2, RFTest) %>% kable()
+```
+
+We can see that the **test errors** is **minimized** when using the **LDA model**.
+
+```{r}
+# Save the prediction results
+TestResult <- data.frame(PassengerID = clean_test$PassengerId, Survived = LDApred)
+write.csv(TestResult, file = "Titanic_Test_Result.csv", row.names = F)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
