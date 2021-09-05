@@ -1,0 +1,441 @@
+---
+title: "Assignment2"
+author: "Yini Lai"
+date: "2019/9/2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read data
+```{r read data}
+library(tidyverse)
+load("gss.RData")
+gss %>%
+filter(year==2004,
+hgunlaw %in% c("AGREE", "DISAGREE")) %>%
+select(age, sex, race, attend, relig, partyid, owngun, hgunlaw) %>%
+mutate(guncontrol=(hgunlaw =="AGREE")) ->
+guns
+```
+
+## Data preparation
+
+### 1.1 Convert age to a numerical variable
+```{r age}
+summary(guns)
+guns %>% count(age, sort = TRUE)
+guns_tidy <- guns
+guns_tidy$age <-sub('89 OR OLDER',89,guns_tidy$age)
+guns_tidy$age <- as.numeric(guns_tidy$age)
+guns_tidy %>% count(age, sort = TRUE)
+```
+
+By using count function, we can see that there is a value "89 OR OLDER" which contains both number and text. Therefore, I replaced it with "89". Then converting "age" to a numerical variable.
+
+### 1.2 Combine factor categories that make sense
+```{r owngun}
+guns_tidy <- guns_tidy %>% mutate(owngun = recode_factor(owngun, DK = 'NA',
+                                               REFUSED = 'NA'))
+```
+
+When asking "whether they have gun at home?", there was a person said "don't know" and 15 of them refused to answer this question in year 2004. These result in "DK" and "REFUSED" in "owngun" variable in the dataset. Actually, these two factor categories do not bring too much information, because we do not know whether these people own guns or not. Therefore, we can treat them as missing values.
+
+Here, it is reasonable to keep **IAP** within **owngun** rather than combine it to "NA", since nearly one-third of the observations' answer is inapplicable. These may strongly influence the prediction model. There are some reasons for it. Firstly, this may be because some of the observations are from the states which have strict restrictions on owning guns. Although it is legal for people from all the states of the US to own guns, some of the states may make it hard to get a license. In this way, people may be less likely to own guns. Another reason could be that some of the observations were restricted to own guns at that period of time since they had committed a crime. The inapplicable data can also be collected from people who are not American. Therefore, they are not allowed to own guns. If we convert the "IAP" to "NA" and omit the missing value later, all the other information collected from these people may disappear.  
+
+### 1.3 Convert NA labels to missing values
+```{r Missing value}
+unique(guns_tidy$owngun)
+guns_tidy <- guns_tidy %>% mutate(owngun = na_if(guns_tidy$owngun, "NA"))
+
+unique(guns_tidy$age)
+guns_tidy <- guns_tidy %>% mutate(age = na_if(guns_tidy$age, "NA"))
+
+unique(guns_tidy$race)
+
+unique(guns_tidy$attend)
+guns_tidy <- guns_tidy %>% mutate(attend = na_if(guns_tidy$attend, "DK,NA"))
+
+unique(guns_tidy$relig)
+guns_tidy <- guns_tidy %>% mutate(relig = na_if(guns_tidy$relig, "NA"))
+
+unique(guns_tidy$partyid)
+guns_tidy <- guns_tidy %>% mutate(partyid = na_if(guns_tidy$partyid, "NA"))
+
+unique(guns_tidy$hgunlaw)
+```
+
+By using **unique()** function on each variable, we can figure out each category within each variable. In this way, we can also find the text "NA".
+Here, we can see that there is a text "NA" within variables "owngun", "age", "relig" and "partyid". There is also a text "DK,NA" in "attend" variable.
+Therefore, converting these label "NA" to missing value.
+
+
+### 1.4 Combine smaller categories, or similar categories
+
+#### 1.4.1 Religion
+```{r religion}
+#install.packages("forcats")
+library(forcats)
+guns_tidy <- guns_tidy %>% mutate(religion = fct_recode(relig, P = "PROTESTANT",
+                                              Ca = "CATHOLIC",
+                                              N = "NONE",
+                                              C = "CHRISTIAN",
+                                              J = "JEWISH",
+                                              I = "INTER-NONDENOMINATIONAL",
+                                              O = "OTHER",
+                                              M = "MOSLEM/ISLAM",
+                                              B = "BUDDHISM",
+                                              H = "HINDUISM",
+                                              OE = "OTHER EASTERN",
+                                              OC = "ORTHODOX-CHRISTIAN",
+                                              Na = "NATIVE AMERICAN"))
+#install.packages("ggmosaic")
+library(ggmosaic)
+ggplot(data = guns_tidy) +
+   geom_mosaic(aes(x = product(religion), fill= guncontrol), na.rm=TRUE) + scale_fill_brewer(palette = "Oranges")+ theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Religion vs Gun Control")
+
+# OTHER, BUDDHISM, HINDUISM, OTHER EASTERN, MOSLEM/ISLAM, ORTHODOX-CHRISTIAN -> Combine
+# PROTESTANT, CATHOLIC, JEWISH, NONE, CHRISTIAN ,INTER-NONDENOMINATIONAL-> keep
+
+guns_tidy %>% count(relig, sort = TRUE)
+
+# PROTESTANT, CATHOLIC,NONE, CHRISTIAN, JEWISH,INTER-NONDENOMINATIONAL -> count greater than 10 -> keep
+```
+
+The proportions of people being opposed to gun control are similar for **Buddism** and **Other Eastern**. Also, the proportions of people being opposed to gun control are similar for **Hinduism**, **Moslem** and **Orthodox-Christain**. 
+Since the number of observation of these groups are small (less than 10), we can combine them to other religion category.
+
+```{r combine religion}
+guns_tidy <- guns_tidy %>% mutate(relig = fct_collapse(relig, 
+                                                       Other = c("OTHER","BUDDHISM","HINDUISM","OTHER EASTERN","MOSLEM/ISLAM","ORTHODOX-CHRISTIAN"), 
+                                                       Protestant = "PROTESTANT", 
+                                                       Catholic = "CATHOLIC", 
+                                                       Jewish = "JEWISH", 
+                                                       None = "NONE", 
+                                                       Christian = "CHRISTIAN", 
+                                                       IN = "INTER-NONDENOMINATIONAL"))
+```
+
+
+#### 1.4.2 Partyid
+```{r partyid}
+guns_tidy <- guns_tidy %>% mutate(partyid1 = fct_recode(partyid, NSD = "NOT STR DEMOCRAT",
+                                              NSR = "NOT STR REPUBLICAN",
+                                              I = "INDEPENDENT",
+                                              SD = "STRONG DEMOCRAT",
+                                              SR = "STRONG REPUBLICAN",
+                                              IND = "IND,NEAR DEM",
+                                              INR = "IND,NEAR REP",
+                                              OP = "OTHER PARTY"))
+library(ggmosaic)
+ggplot(data = guns_tidy) +
+   geom_mosaic(aes(x = product(partyid1), fill= guncontrol), na.rm=TRUE)+ scale_fill_brewer(palette = "Purples")+ theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Partyid vs Gun Control")
+
+# INDEPENDENT & IND,NEAR DEM -> combine
+# IND,NEAR REP, NOT STR REPUBLICAN -> combine
+```
+
+Since the proportions of people being opposed to gun control are similar for **Independent** group and **Independent, near democrat** group, these two categories can be combined. 
+The number of people from **Other party** is small. Therefore, this can also be regarded as **Independent**
+Also, the probabilities of people being opposed to gun control are similar for ***Independent, near republican** and **not strong, republican**. Therefore, these two categories can be combined.
+In these ways, the combination of different categories will not have a large influence on prediction.
+
+```{r combine partyid}
+guns_tidy <- guns_tidy %>% mutate(partyid = fct_collapse(partyid, 
+                                                         Independent = c("INDEPENDENT","IND,NEAR DEM", "OTHER PARTY"),
+                                                         NSRepublican = c("IND,NEAR REP", "NOT STR REPUBLICAN"), 
+                                                         Democrat = "STRONG DEMOCRAT", 
+                                                         NSDemocrat = "NOT STR DEMOCRAT", 
+                                                         Republican = "STRONG REPUBLICAN"))
+```
+
+
+#### 1.4.3 Attend
+```{r attend}
+guns_tidy <- guns_tidy %>% mutate(attend1 = fct_recode(attend, EW = "EVERY WEEK",
+                                              N = "NEVER",
+                                              OY = "ONCE A YEAR",
+                                              SY = "SEVRL TIMES A YR",
+                                              SM = "2-3X A MONTH",
+                                              MOW = "MORE THN ONCE WK",
+                                              LOY = "LT ONCE A YEAR",
+                                              OM = "ONCE A MONTH",
+                                              NOW = "NRLY EVERY WEEK",
+                                              "NA" = "DK,NA"))
+ggplot(data = guns_tidy) +
+   geom_mosaic(aes(x = product(attend1), fill= guncontrol), na.rm=TRUE) + scale_fill_brewer(palette = "Greens") + theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Attend vs Gun Control")
+
+# LT ONCE A YEAR, ONCE A YEAR, SEVRL TIMES A YR -> combine
+# 2-3X A MONTH, NRLY EVERY WEEK, EVERY WEEK -> combine
+```
+
+People who attend religious services **less than once a year**, **once a year** and **several times a year** have similar proportions of being opposed to greater gun control. These can be combined and noted as **yearly** attendance.
+
+Also, people who attend **2 to 3 times per month**, **nearly every week** and **every week** have similar proportion of being against greater gun control. They can be combined and noted as **weekly** attendance.
+
+```{r combine attend}
+guns_tidy <- guns_tidy %>% mutate(attend = fct_collapse(attend, 
+                                                        Yearly = c("LT ONCE A YEAR","ONCE A YEAR","SEVRL TIMES A YR"),
+                                                        Weekly = c("2-3X A MONTH","NRLY EVERY WEEK","EVERY WEEK"),
+                                                        Never = "NEVER", 
+                                                        Monthly = "ONCE A MONTH", 
+                                                        MOW = "MORE THN ONCE WK"))
+```
+
+### 1.5 Analysis of attend
+```{r analysis of attend}
+no_relig <- guns_tidy %>% filter(relig == "None") %>% filter(attend != "Never") %>% select(relig,attend)
+no_relig
+```
+
+It is a bit strange that people who have no religion also attend religious services. This can be the case that people attend these services because they were a bit interested in it.
+
+### 1.6 Order variables
+```{r order partyid}
+#colnames(guns_tidy) # Order the variables/column positions
+#guns_tidy <- guns_tidy[, c(2, 3, 5, 6, 7, 4, 1, 8, 9, 10, 11, 12, 13)]
+#colnames(guns_tidy)
+
+#guns_tidy <- guns_tidy %>% arrange(age) # Order age
+
+guns_tidy <- guns_tidy %>% mutate(partyido = fct_recode(partyid, 
+                                                        '1' = "Democrat",
+                                                        '2' = "NSDemocrat",
+                                                        '3' = "Independent",
+                                                        '4' = "NSRepublican",
+                                                        '5' = "Republican")) %>% 
+arrange(partyido)
+```
+
+Order the variable **partyid**. In this way, the partyid will be listed in the following order: "Democrat","NSDeomcrat","Independent","NSRepublican","Republican".
+
+**Note:** Not too sure about the meaning of the question.
+If the question means that converting the categorical variables like **partyid** and **attend** into numerical variables. Then the numbers can represent the levels of a specific variable. For example, here, 1:5 means Democract to Republican. The larger number means that people are more likely to be republican and the smaller number means that people are more likely to be democracts.
+If this makes sense, the variable **attend**, can also be converted into a numerical variable, with 1:5 represents the frequency of attending religious services. The larger the number, the more frequency that people attending religious services.  
+
+```{r ordinal variable attend}
+#guns_tidy <- guns_tidy %>% mutate(attendo = fct_recode(attend, 
+                                                        #'1' = "Never",
+                                                        #'2' = "Yearly",
+                                                        #'3' = "Monthly",
+                                                        #'4' = "Weekly",
+                                                        #'5' = "MOW"))
+```
+
+
+### 1.7 Drop unused level 
+```{r drop level}
+summary(guns_tidy)
+guns_tidy <- droplevels(guns_tidy)
+```
+
+#### 1.7.1 Drop unused level in "race", "owngun","attend"
+
+There are some categories with 0 count in the dataset. For example, within variable **race**, there is a category "IAP" which has zero counts. Similarly, within variable **owngun**, there is a category "NA" which has zero counts. Also, within variable **attend**, there is a category "DK,NA" which has zero counts. These categories with zero count can be omitted since they do not bring useful information when constructing the predicted model.
+
+#### 1.7.2 Analysis of variable guncontrol
+
+The binary response variable **guncontrol** was constructed by the existed variable **hgunlaw**. People who agree with "more legal restrictions on handguns in our society" would be considered as "TRUE" for guncontrol. Otherwise, they would be noted as "FALSE" for guncontrol.
+Fortunately, we can see that in 2004, there are only two categories with more than zero count within **hgunlaw** variable. This means that people who are noted as "FALSE" for guncontrol are those against more legal restrictions on handguns. Therefore, the way to construct **guncontrol** variable is correct.
+
+#### 1.7.3 Drop unused level in "hgunlaw"
+
+However, we can also see that there remain three categories ("IAP", "DONT KNOW" and "NA") with zero counts in **hgunlaw** variable. It is reasonable to omit them here. The most important reason is that these categories with zero count will not have a strong influence on the prediction. Then, it is hard to define or combine "DONT KNOW" and "IAP" to other categories since they are literally different from "agree/disagree". For "DONT KNOW" category, if it has a large count, probably it can be considered as a third category. This is because there may be some people who hold neutrality regarding gun control. In terms of "IAP", this may be because, in other years, there were some replies from observations who were younger than 18. They are not allowed to own gun. Then they may consider that the current gun control is too strict. Therefore, their answers are inapplicable.
+
+```{r summary after drop level}
+summary(guns_tidy)
+```
+
+
+### 1.8 Simplify the names
+```{r recode factor}
+guns_tidy <- guns_tidy %>% mutate(sex = recode_factor(sex, MALE = 'Male',
+                                               FEMALE = 'Female'))
+
+guns_tidy <- guns_tidy %>% mutate(race = recode_factor(race, WHITE = 'White',
+                                               BLACK = 'Black', OTHER = 'Other'))
+
+guns_tidy <- guns_tidy %>% mutate(owngun = recode_factor(owngun, YES = 'Yes',
+                                               NO = 'No'))
+
+guns_tidy <- guns_tidy %>% mutate(hgunlaw = recode_factor(hgunlaw, AGREE = 'Agree',
+                                               DISAGREE = 'Disagree'))
+```
+
+
+## Data exploration
+
+### 2.1 Pairwise relationship
+```{r pairwise relationship}
+guns_tidy %>% GGally::ggpairs(cardinality_threshold = 16)
+```
+
+### 2.2 Relationship between guncontrol and predictors
+```{r guncontrol vs predictors}
+ggplot(guns_tidy, aes(x= age, fill = guncontrol)) + geom_bar(position = "fill") + scale_fill_brewer(palette = "Paired") + theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Age vs Gun Control")
+
+ggplot(guns_tidy, aes(x= sex, fill = guncontrol)) + geom_bar(position = "fill") + scale_fill_brewer(palette = "Paired")+ theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Sex vs Gun Control")
+
+ggplot(guns_tidy, aes(x= race, fill = guncontrol)) + geom_bar(position = "fill") + scale_fill_brewer(palette = "Paired")+ theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Race vs Gun Control")
+
+ggplot(guns_tidy, aes(x= attend, fill = guncontrol)) + geom_bar(position = "fill") + scale_fill_brewer(palette = "Paired")+ theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Attend vs Gun Control")
+
+ggplot(guns_tidy, aes(x= relig, fill = guncontrol)) + geom_bar(position = "fill") + scale_fill_brewer(palette = "Paired")+ theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Religion vs Gun Control")
+
+ggplot(guns_tidy, aes(x= partyid, fill = guncontrol)) + geom_bar(position = "fill") + scale_fill_brewer(palette = "Paired")+ theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Partyid vs Gun Control")
+
+ggplot(guns_tidy, aes(x= owngun, fill = guncontrol)) + geom_bar(position = "fill") + scale_fill_brewer(palette = "Paired")+ theme(panel.background = element_blank(),plot.title = element_text(hjust = 0.5))+ labs(title = "Owngun vs Gun Control")
+```
+
+- Overall, it seems that there is little relationship between age and gun control. However, we still can see that more than 50% of people younger than 40 years old for greater gun restriction. The variance between young people is smaller than that between elderly people. 
+- People with different gender may have different opinions regarding greater gun control. As the graph shows that, female (around 0.8) are more likely to support greater gun control than male (around 0.6).
+- In terms of race, the proportion of people who support greater gun control are different for white people and black people, with nearly 0.675 and 0.875 respectively. However, the proportions for black people and other race are similar.
+- It seems that the relationship between the frequency of people attending religious services and greater gun control is not too significant. However, people who participate in religious services weekly are more likely to support greater gun control than any other group. People who attend yearly and never attend have almost the same proportion regarding gun control.
+- The proportion of people supporting greater gun control are different among different religious parties. It seems that people who are Christian and whose religion are not on the list would love to have greater gun control. Then follows by Catholic. People who are Jewish and who are Inter-nondenominational have similar proportion regarding greater gun control. People who are Protestant and who have no religion are less likely to support greater gun control compared with other religious groups.
+- Partyid may have a strong relationship with gun control. People who are Democrat are most likely to support greater gun control, with 87.5% of them for gun control. Then follows by Not Strong Democrat, with about 80% of them agree with restrictions on guns. Next follows by Independent and Not Strong Republican, with nearly 0.75 and 0.7 respectively. Finally, Only 40% of the Republican support greater gun control. 
+- People who own gun do not agree on greater gun control, while those who do not own gun would expect greater gun control. In terms of those inapplicable data, nearly 70% of these observations would like to have restrictions on handguns. 
+
+## Modelling main effects
+
+### 3.1 Modelling
+```{r Modelling main effects}
+guns_tidy <- na.omit(guns_tidy)
+lmod <- glm(guncontrol ~ age + sex + race + attend + relig + partyid + owngun,control = list(maxit = 500), family = binomial, guns_tidy)
+summary(lmod)
+```
+
+Here, we can see that nearly all of the predictors in the model are significant except **age** and **attend**. 
+
+### 3.1.1 modelling with ordered categories
+```{r modelling with ordered categories}
+#guns_tidy$attendo <- as.numeric(guns_tidy$attendo: From the relationship graph, the main effects of attend is insignificant
+guns_tidy$partyido <- as.numeric(guns_tidy$partyido)
+guns_tidy <- na.omit(guns_tidy)
+lmod0 <- glm(guncontrol ~ age + sex + race + attend + relig + partyido + owngun,control = list(maxit = 500), family = binomial, guns_tidy)
+summary(lmod0)
+```
+
+Here, we can also see that nearly all of the predictors in the model are significant except **age** and **attend**. Although the coefficient is different compared to the model on 3.1, it seems that converting into numerical variable may not have a large influence in the significant of the variable 
+
+### 3.2 Chi-squared test
+```{r Chi-squared test}
+pchisq(deviance(lmod), df.residual(lmod), lower = FALSE)
+drop1(lmod, test = "Chisq")
+```
+
+- Since P-value is 0.568929 which is much greater than 0.05, we can conclude that the model fits sufficiently well. 
+- After the deviance test, we can also see that nearly all of the predictors are significant except **age** and **attend**. This result is similar to z-statistics. 
+
+### 3.3 Interpretation of coefficients
+
+```{r coefficients}
+odd <- round((exp(coef(lmod)[-1]) - 1), 2)
+odd
+odd_FALSE <- 1/odd 
+odd_FALSE
+```
+
+The significant variables at 5% level are listed below.
+- **sexFemale:** odds of saying that the people being opposed to greater gun control increase by 52.4% among females than males when all other variables remain constant.
+- **raceOther:** odds of saying that the people being opposed to greater gun control increase by 71.4% among other race than white when all other variables remain constant.
+- **religCatholic:** odds of saying that the people being opposed to greater gun control increase by 111.1% among Catholic than Protestant when all other variables remain constant.
+- **religChristian:** odds of saying that the people being opposed to greater gun control increase by 69.4% among Christian than Protestant when all other variables remain constant.
+- **partyidNSDmocract:** odds of saying that the people being opposed to greater gun control decrease by 250% among not strong democrat than strong democrat when all other variables remain constant.
+- **partyidIndependent:** odds of saying that people being opposed to greater gun control decrease by 153.8% among independent than strong democrat when all other variables remain constant.
+- **partyidNSRepublican:** odds of saying that people being opposed to greater gun control decrease by 129.9% among republican than strong democrat when all other variables remain constant.
+- **partyidRepublican:** odds of saying that people being opposed to greater gun control decrease by 113.6% among strong republican than strong democrat when all other variables remain constant.
+- **owngunNo:** odds of saying that people being opposed to greater gun control increase by 44.8% among not owning gun than owning gun.
+
+### 3.4 Best model with main effects
+```{r Best model with main effects}
+lmodr <- step(lmod, trace = FALSE)
+summary(lmodr)
+AIC(lmodr)
+```
+
+Here, from the best model with main effects, we can see that it eliminates the predictors down to **sex**, **race**, **religion**,**partyid**, and **owngun**. All of the predictors in this model are significant.
+
+
+## Modelling main effects and interactions
+
+### 4.1 Modelling
+```{r main effects and interactions}
+lmod2 <- glm(guncontrol ~ (age + sex + race + attend + relig + partyid + owngun)^2,control = list(maxit = 500), family = binomial, guns_tidy)
+summary(lmod2)
+```
+
+Among the two-interactions, **age:attend**,**sex:race**,**race:attend**,**attend:partyid**,**attend:owngun** and **relig:owngun** are significant. Their relationship will be visualised in later section.
+
+### 4.2 Interpretation of missing coefficient
+```{r missing cofficients}
+guns_tidy %>% group_by(race, relig) %>% summarise(count = n()) %>% spread(race, count)
+guns_tidy %>% group_by(attend, relig) %>% summarise(count = n()) %>% spread(attend, count)
+guns_tidy %>% group_by(relig, partyid) %>% summarise(count = n()) %>% spread(relig, count)
+guns_tidy %>% group_by(relig, owngun) %>% summarise(count = n()) %>% spread(relig, count)
+```
+
+- For "race:relig", "attend:relig" and "relig:partyid", the missing coefficients are presumably due to missing combinations of factors.
+- For "relig:owngun", this may be because the data matrix is not singular.
+
+### 4.3 Chi-squared test
+```{r Chi-squared test2}
+pchisq(deviance(lmod2), df.residual(lmod2), lower = FALSE)
+drop1(lmod2, test = "Chisq")
+```
+
+- Since P-value is 0.709377 which is much greater than 0.05, we can conclude that the model fits sufficiently well. 
+- After the deviance test, we can see that **sex:race**, **race:attend**, **attend:relig** and **partyid:owngun** are significant at 5% level. This is a bit different from the result of z-statistic. The different in deviance is preferred over z-statistic as it is more accurate.
+
+### 4.4 Best model with interactions
+```{r Best model with interactions}
+lmodr2 <- step(lmod2, trace = FALSE)
+summary(lmodr2)
+AIC(lmodr2)
+```
+
+- The AIC of best two-way interactions model is 1282.556. 
+- The step function eliminates the predictors down to **sex**, **race**, **religion**,**partyid**, **owngun**, **sex:race**, and **sex:religion**. 
+- All of the two-way interactions are significant in this model.
+
+### 4.5 Visualisation
+```{r vis main effects}
+library(visreg)
+visreg(lmodr, 'partyid', gg = TRUE) + theme_bw()
+visreg(lmodr, 'owngun', gg = TRUE) + theme_bw()
+```
+
+- Before modelling the interactions, **sex**, **race**, **religion**,**partyid**, and **owngun** are significant. 
+- **partyid:** The probabilities of people supporting greater gun control are different among different parties. People who are "Democract" are more likely to agree on gun restrictions, with all other predictors in the model held fixed. Then follows by "Not Strong Democrat","Independent","Not Strong Republican" and "Republican". It seems that holding other predictors in the model fixed, the probability of people supporting greater gun control will decrease if people are more likely to be Republican.
+- **owngun** The probabilities of people supporting greater gun control are different regarding whether they own gun. It seems that people who do not own gun are more likely to support greater gun control, with all other predictors in the model held fixed. Also, people who own gun are less likely to support greater gun control.
+
+
+```{r vis interactions1}
+visreg(lmodr, 'sex', gg = TRUE) + theme_bw()
+visreg(lmodr, 'race', gg = TRUE) + theme_bw()
+visreg(lmodr2, 'sex', by = 'race', gg = TRUE) + theme_bw()
+```
+
+- **Before doing interactions**
+ - **sex:** It seems that female are more likely to support greater gun control than the male with all the other predictors held fixed. 
+ - **race:** People in other race have the highest probability in supporting greater gun control, with all the other predictors held fixed. Black people have a higher probability than white people in supporting greater gun control, with all the other predictors held fixed.
+- **After doing interactions**
+ - the interactions between race and sex substantially change the interpretation of the main effects of sex. For White people and people in other race, the female has a higher probability than male in supporting greater gun control. However, for black people, females are less likely than male in supporting gun restrictions.
+
+
+```{r vis interactions2}
+visreg(lmodr, 'sex', gg = TRUE) + theme_bw()
+visreg(lmodr, 'relig', gg = TRUE) + theme_bw()
+visreg(lmodr2, 'sex', by = 'relig', gg = TRUE) + theme_bw()
+```
+
+- **Before doing interactions**
+ - Female are more likely to support gun control than the male with other predictors held fixed.
+ - People who are Christian, Catholic and other religion have a higher probability in supporting gun control, with all the other predictors held fixed. People who are Inter-nondenominational have the least probability in supporting greater gun control, with all the predictors held fixed.
+- **After doing interactions**
+ - It seems that the interaction between religion and sex removes the effects of these two predictors. After doing interaction, we can draw a flat line across the grey band. Therefore, the interaction between religion and sex is insignificant. 
+
+### 4.6 Comment
+
+From the visreg plots, we can see that **female in other race** has the **lowest** probability of being opposed to greater gun control. Besides, **white male** has the **highest** probability of being opposed to greater gun control.

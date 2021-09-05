@@ -1,0 +1,396 @@
+---
+title: "Assignment3"
+author: "Yini Lai"
+date: "2019/9/20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval=TRUE, warning = FALSE)
+```
+
+```{r}
+library(faraway)
+library(tidyverse)
+library(lme4)
+library(kableExtra)
+library(naniar)
+library(visdat)
+library(GGally)
+nepali <- as.tibble(nepali)
+```
+
+### Overview of the dataset
+
+- **id:** There is a six digit code for the child's ID: 2 digits for the panchayat number; 2 digits for the ward within panchayat; 1 digits for the household; 1 digit for child within household.
+- **sex:** 1 = male; 2 = female
+- **wt:** Child's weight measured in kilograms
+- **ht:** Child's height measured in centimeters
+- **mage:** Mother's age in years
+- **lit:** Indicator of mother's literacy: 0 = no; 1 = yes
+- **died:** The number of children the mother has had that died.
+- **alive:** alive
+- **age:** age of child, measured in months
+
+### Q1
+
+```{r}
+vis_miss(nepali, sort_miss = TRUE)
+nepali_tidy <- nepali%>% filter(!is.na(wt))
+vis_miss(nepali_tidy, sort_miss = TRUE)
+```
+
+Before tidying the data, we can see there are 12.3% of missing value in columns "wt" and "ht". Removing the observations that include missing value in the column "wt" by using filter function. In this way, it will only keep those observations without missing weight. Also, there is no missing value in the dataset now. 
+
+### Q2
+
+```{r}
+vis_dat(nepali_tidy) + scale_fill_brewer(palette = "YIGn")
+```
+
+It is clear from the graph that "id", "sex", "mage", "lit", "died", "alive" and "age" are stored as integer. "wt" and "ht" are stored as numeric. However, "sex" and "lit" are categorical variable. They should be stored as factor, otherwise, it may make some influence on our fitted model. This is because if we include the integer variable in our model, it will be treated as a continuous variable. If we include the categorical variable in our model, it will be treated as a dummy variable. Therefore, this information will influence the model coefficient. 
+
+```{r}
+nepali_tidy$sex <- as.factor(nepali_tidy$sex)
+nepali_tidy$lit <- as.factor(nepali_tidy$lit)
+
+nepali_tidy <- nepali_tidy %>% mutate(sex = fct_recode(sex, male = "1",
+                                              female = "2"))
+nepali_tidy <- nepali_tidy %>% mutate(lit = fct_recode(lit, no = "0",
+                                              yes = "1"))
+
+nepali_tidy <- nepali_tidy %>% select(-ht)
+
+vis_dat(nepali_tidy) + scale_fill_brewer(palette = "Purples")
+```
+
+Using as.factor() function to recode the categorical variables "sex" and "lit" to factors. Then, since for variable "sex", "1" represents "male" and "2" represents "female", we can use fct_recode() function to put them in appropriate labels. Same for variable "lit", "0" represents "no" and "1" represents "yes".
+
+Since we do not want to use height as a predictor, we can use select function to get rid of this variable.
+
+### Q3
+
+```{r}
+ggplot(nepali_tidy, aes(x = age, y = wt, color = sex)) + geom_point() + geom_smooth() + facet_grid(~ sex) + 
+  scale_colour_brewer(palette = "Paired") + 
+  theme(panel.background = element_blank(), 
+panel.grid.major.x = element_line(colour = "grey80", size = 0.25),
+panel.grid.minor.x = element_line(colour = "grey80", size = 0.25),
+panel.grid.minor.y = element_line(colour = "grey80", size = 0.25),
+panel.grid.major.y = element_line(colour = "grey80", size = 0.25),
+strip.background = element_blank(),
+strip.text = element_text(face = "bold",size = rel(1.0)),
+plot.title = element_text(colour = "black", face = "bold", size = 15, hjust = 0.5)) +
+  xlab("Age") +
+  ylab("Weight") +
+  labs(title = "Age vs Weight by Sex")
+```
+
+From the graph, we can see that there is a strong positive relationship between age and sex. Overall, as age increases, the weight of the child will increase regardless of their sex. However, there are some differences between a male and a female child. As we can see, the slope for the male is a bit steeper than that for female. This indicates that the weight of a male child increases faster as their age increase than that of female child. Also, the variation of the weight of the female child is larger than that of the male child.
+
+### Q4
+
+```{r}
+nepali_tidy$age <- nepali_tidy$age/12
+```
+
+Since the child's age is measured in months, we can convert it to year, which will be easier to interpret. Therefore, dividing the age by 12 to get the age measured in year.
+
+```{r}
+ggplot(nepali_tidy, aes(x = sex, y = wt)) + geom_boxplot() 
+ggplot(nepali_tidy, aes(x = lit, y = wt)) + geom_boxplot()
+ggplot(nepali_tidy, aes(x = age, y = wt)) + geom_point() + geom_smooth()
+ggplot(nepali_tidy, aes(x = died, y = wt)) + geom_point() + geom_smooth()
+ggplot(nepali_tidy, aes(x = alive, y = wt)) + geom_point() + geom_smooth()
+ggplot(nepali_tidy, aes(x = mage, y = wt)) + geom_point() + geom_smooth()
+```
+
+To predict a child's weight with existed information, we need to select the appropriate predictors. Therefore, we can plot the relationship between each predictor and the weight. 
+
+- From the first graph, we can see that the median of the weight is different for male and female children. This indicates that sex may have an influence on the child's weight. 
+- From the second graph, we can see that the median of the weight is a little bit different depending on whether there is an indicator of the mother's literacy. This indicates that a mother's education level may have an impact on the a child's weight.
+- From the third graph, it is clear that there is a strong positive relationship between child's age and their weight. This indicates that the child's age has an impact on their weight
+- From the fourth graph, the smooth line shows that the number of children the mother has had died may also influence the child's weight.
+- From the fifth graph, it seems that if the number of children that the mother has ever had born alive increase, the child's weight will have a little bit increase. This still indicates that "alive" may affect the child's weight.
+- Finally, from the last graph, we can see that the mother's age also has an influence on children's weight.
+
+Therefore, these predictors are all appropriate for predicting the child's weight and should be included in the model as fixed main effects. 
+
+```{r}
+mmod <- lmer(wt ~ age*sex + mage + lit + died + alive + (1|id), data = nepali_tidy)
+summary(mmod) 
+```
+
+**Fixed effects**
+
+- **age:** Holding all other variables remain constant and assuming there is not any variance between the id, as the age increase 1 year, the weight of the male child will increase 1.62kg.
+- **sexfemale:** Holding all other variable remain constant and assuming there is not any variance between the id, the female child will be 0.355kg lighter than the male child.
+- **mage:** Holding all other variable remain constant and assuming there is not any variance between the id, as mother's age increase 1, the child's weight will increase 0.059kg.
+- **lityes:** Holding all other variable remain constant and assuming there is not any variance between the id, child whose mother is literate will be 0.720kg heavier than whose mother is illiterate.
+- **died:** Holding all other variable remain constant and assuming there is not any variance between the id, the mother who has 1 more child that had died, the weight of her child will decrease 0.066kg.
+- **alive:** Holding all other variable remain constant and assuming there is not any variance between the id, the mother who has 1 more child that had born alive, the weight of her child will decrease 0.013kg.
+- **age:sexfemale:** Holding all other variables remain constant and assuming there is not any variance between the id, as the age increase 1 year, the weight of the female child will increase $1.61661 - 0.01054 = 1.606kg$
+
+**Random effects**
+
+In order to describe the random effects, we estimate its variance and standard deviation. In this way, we can learn about its distribution. 
+
+- The between-id standard deviation is 1.334. The standard deviation of residuals is 0.437.
+
+- The variance of id is 1.779. This means that group the data by id, the variance between different id is 1.779.
+
+- The variance of residual is 0.191.
+
+- The *intraclass correlation coefficient (ICC)* is 
+
+$\rho = \frac{\sigma^2_{\alpha}}{\sigma^2_{\alpha}+\sigma^2_{\xi}}$
+
+$0.989 = \frac{1.779^2}{1.779^2+0.191^2}$
+
+This means that the variation across the id is higher than the variation not across the id.
+
+**Note**
+
+In this question, we do not need to set REML = FALSE, because REML = TRUE would be more accurate when we estimate the mix effects model.
+
+### Q5
+
+The expected difference in child weight for a 15 and 25 years old mother is the difference of the mother's age multiply by the coefficient of variable **mage**, which is
+
+$(25 - 15)*0.05866 = 0.5866kg$
+
+This is because the expected value of random effects is zero. So the random effects will not have much influence on the expected value of child weight.
+Since holding all other variables constant, other variables will not have an influence on the expected difference in child weight for mother at a different age.
+
+### Q6
+
+```{r}
+GGally::ggpairs(nepali_tidy,columns = 2:ncol(nepali_tidy))
+```
+
+It is wrong to hold all other variables constant when we consider the expected difference of child's weight as one of the predictor changes. This is because these variables are connected with each other. 
+
+Taking **mage** as an example (also the example from the previous question):
+From the third column of the graph showing above, it seems that there is a positive relationship between the mother's age and the number of children the mother has that had born alive. This means that the elder mother may have more child who had born alive. Also, it seems that the elder mother may have an elder child. 
+
+Therefore, it is unreasonable to keep other variables constant as they may be correlated with each other.
+
+### Q7
+
+The expected difference in weight for identical twins is zero.
+
+- Looking at the fixed effects, the expected value in weight for identical twins is zero. This is because if they are twins, they have the same **sex** and the same mother. So the values of the variables **mage**, **lit**, **died**, **alive**, and **age** are exactly the same. Therefore, the expected difference between their weight is zero.
+
+- Considering the random effects, the expected value of random effects is zero. 
+ 
+However, this is unreasonable, because twins have a different id. The variance of id indicates that there are some differences between different child even when they have the same value for fixed effects. Therefore the analysis of the expected difference in weight for identical twins is wrong since it ignores the variance of id. From real-life case, we can also know that the weight of identical twins may be different.
+
+### Q8
+
+```{r}
+mmod2<- lmer(wt ~ age + mage + (1|id), data = nepali_tidy, REML = FALSE)
+summary(mmod2)
+```
+
+**Note:** Since we will use bootstrap test to check the model later, we should set **REML = FALSE** when we construct the model. 
+
+```{r}
+#Revise the first mixed effects model with REML = FALSE
+mmod1 <- lmer(wt ~ age*sex + mage + lit + died + alive + (1|id), data = nepali_tidy,REML = FALSE)
+summary(mmod1)
+```
+
+**Second mixed effects Model** with only age and mage as fixed effects and child as random effect can be written as:
+
+$weight = 4.731 + 1.613age_{i} + 0.046mage_{i} + \gamma_{i} + \xi_{i}$
+
+where i indexes the individual, $\xi \sim N(0,0.1905)$ and $\gamma \sim N(0, 1.7838)$
+
+**Previous model** with all the variables as fixed main effects, with an age-sex interaction and with child as a random effect can be written as:
+
+$weight = 4.61938 + 1.617age_{i} -0.353female_{i} + 0.058mage_{i} + 0.720lityes_{i} - 0.066died_{i} -0.012alive_{i} - 0.011age_{i}*female_{i} + \gamma_{i} + \xi_{i}$
+
+where i indexes the individual, $\xi \sim N(0,0.1905)$ and $\gamma \sim N(0,1.7200)$
+
+**Note:** Here, we also need to revise the first mixed effects model with **REML = FALSE**, because we need to calculate the Log-likelihood. In this way, the model will be estimated based on MLE.
+
+```{r}
+# Fit null model with only age and mage as fixed effects and child as random effect
+nullmodel <- lmer(wt ~ age + mage + (1|id), data = nepali_tidy, REML = FALSE)
+actual <- logLik(mmod1) - logLik(nullmodel)
+
+#simulate from null model
+set.seed(3580)
+nsim<-1000
+lrstat <- numeric(nsim)
+for (i in seq(nsim)) {
+  y <- simulate(nullmodel)[,1]
+  bnull <- lmer(y ~ age + mage + (1|id), data = nepali_tidy, REML = FALSE)
+  balt <- lmer(y ~ age*sex + mage + lit + died + alive + (1|id), data = nepali_tidy,REML = FALSE)
+  lrstat[i] <- logLik(balt) - logLik(bnull)
+}
+
+#Compute boostrap p-value
+mean(actual < lrstat) %>% kable() %>% kable_styling()
+
+#Alternative
+#Visualise the boostrap test result
+p <- tibble(null = lrstat) %>% ggplot(aes(x = lrstat)) +
+  geom_density() +
+  geom_vline(xintercept = actual, colour = "red", size = 1) +
+  geom_vline(xintercept = quantile(lrstat, probs = 0.95), colour = "blue", size = 1) +
+  theme(panel.background = element_blank(), 
+panel.grid.major.x = element_line(colour = "grey80", size = 0.25),
+panel.grid.minor.x = element_line(colour = "grey80", size = 0.25),
+panel.grid.minor.y = element_line(colour = "grey80", size = 0.25),
+panel.grid.major.y = element_line(colour = "grey80", size = 0.25),
+plot.title = element_text(colour = "black", face = "bold", size = 15, hjust = 0.5)) +
+labs(title = "Bootstrap distribution")
+
+p + annotate("text", x=3.75, y=0.2, label="actual") +
+annotate("text", x=5.5, y=0.1, label="lrstat")
+```
+
+**Null Model** $M_{0}$:
+
+$weight = 4.731 + 1.613age + 0.046mage + id\gamma + \xi$
+
+where $\xi \sim N(0,0.1905)$ and $\gamma \sim N(0, 1.7838)$
+
+**Alternative model** $M_{1}$:
+
+$weight = 4.61938 + 1.617age -0.353female + 0.058mage + 0.720lityes - 0.066died -0.012alive -0.011age*female + + id\gamma + \xi$
+
+where $\xi \sim N(0,0.1905)$ and $\gamma \sim N(0,1.7200)$
+
+**Null hypothesis:**  $M_{0} = M_{1}$
+
+**Alternative hypothesis:** $M_{0} \neq M_{1}$
+
+**Step 1: Actual deviance:**
+
+$D_{s} = Loglik(M_{1}) - Loglik(M_{0})$ 
+
+**Step 2: Bootstrap deviance**
+
+Sampling $\hat{y}$ from the null model $M_{0}$ for 1000 times
+
+Fit $\hat{M_{0}}$ using $\hat{y}$
+
+Fit $\hat{M_{1}}$ using $\hat{y}$
+
+$D_{bs} = Loglik(\hat{M_{1}}) - Loglik(\hat{M_{0}})$ 
+
+**Step 3: Compute the bootstrap P-value**
+
+From the table, we can see that the P-value is 0.25, which is greater than 0.05. This means that there are 24.7% of the bootstrap deviance which is greater than the actual deviance. Therefore, we do not reject the null hypothesis and conclude that $M_{0} = M_{1}$. This indicates that the larger model (alternative model) with more predictors does not bring extra information. The small model (null model) is better in this case.
+
+**Alternative, we can:**
+
+**Step 3: Draw the distribution of bootstrap deviance**
+
+The distribution is shown on the graph above. The red line indicates the actual deviance and the blue line indicates the location of 95% quantile of bootstrap deviance. Here, the red line is on the left side of the blue line, which means that the actual deviance is not on the rejection region. Therefore, we do not reject the null hypothesis and conclude that $M_{0} = M_{1}$. This indicates that the larger model (alternative model) with more predictors does not bring extra information. The small model (null model) is better in this case.
+
+### Q9
+
+```{r}
+mmod3<- lmer(wt ~ age + mage + (age|id), data = nepali_tidy, REML = FALSE)
+summary(mmod3)
+```
+
+**Note:** Since we will use AIC to compare different mixed effects model later, we should set **REML = FALSE** when we construct this model.
+
+**Third mixed effects Model** with interaction between age and child can be written as:
+
+$weight = 4.897 + 1.643age_{j} + 0.044mage_{i} + \gamma^0_{i} + \gamma^1_{i}age_{j} +\xi_{ji}$
+
+- where j indexes the age, i indexes the individual, $\xi_{ji} \sim N(0,0.1414)$, $\gamma^0_{i} \sim N(0,1.9050)$ and $\gamma^1_{i} \sim N(0,0.1839)$ 
+
+**Fixed effects**
+
+- The **intercept** of this model is 4.897.
+- The coefficient of **age** is 1.643. This indicates that as child's age increase 1, on average, his/her weight will increase 1.643kg. 
+- The coefficient of **mage** is 0.044.This indicates that as mother's age increase 1, the child's weight will increase 0.44kg
+
+**Random effects**
+
+- The variation for the intercept and slope are 1.905 and 0.184 respectively.
+- Additional variation in the measurement not so far accounted for has variance of 0.141.
+
+```{r}
+data.frame(AIC(mmod2),AIC(mmod3)) %>% kable() %>% kable_styling()
+```
+
+From the table, we can see that the AIC for the **second mixed effects model** is **1776.287**. The AIC for the **third mixed effects model** is **1701.673**. Since **1701.673 is less than 1776.287**, we can conclude that the **third mixed effects model** is better than the second mixed effects model.
+
+### Q10
+
+```{r}
+data.frame(AIC(mmod1),AIC(mmod2),AIC(mmod3)) %>% kable() %>% kable_styling()
+```
+
+From the table, we can see that 
+- The AIC for the **first mixed effects model** is **1779.405**
+- The AIC for the **second mixed effects model** is **1776.287**. 
+- The AIC for the **third mixed effects model** is **1701.673**.
+
+Since **1701.673 < 1776.287 < 1779.405**, we can conclude that the third mixed effects model is best among the three mixed effects models.
+
+```{r}
+summary(mmod3)
+```
+
+From the summary of the third mixed effects model, we can see that holding other variables constant, on average, the weight of the children are expected to increase 1.643kg as their age increase 1 year. 
+
+**Notes:** 
+
+- In this model, we have a random slope with age. This indicates that there is a variance between the slopes of the age. However, in this question, we are talking about the expected weight of the children. Since the expected random effect is zero, the coefficient of age on average is 1.64. 
+- Since we compare the three mixed effects models by AIC, we should set **REML = FALSE**. However, in this case, the summary of the model may be biased.
+
+### Q11
+
+```{r}
+nepali_tidy <- nepali_tidy %>% mutate(panchayat = substring(nepali_tidy$id, 1, 2))
+nepali_tidy <- nepali_tidy %>% mutate(ward = substring(nepali_tidy$id, 3, 4))
+nepali_tidy <- nepali_tidy %>% mutate(household = substring(nepali_tidy$id, 5,5))
+nepali_tidy <- nepali_tidy %>% mutate(child = substring(nepali_tidy$id, 6))
+
+nepali_tidy$panchayat <- as.factor(nepali_tidy$panchayat)
+nepali_tidy$ward <- as.factor(nepali_tidy$ward)
+nepali_tidy$household <- as.factor(nepali_tidy$household)
+nepali_tidy$child <- as.factor(nepali_tidy$child)
+```
+
+- The first two digits represent **panchayat** number.
+- The third and fourth digits represent **ward** within panchayat.
+- The fifth digit represents **household** within ward within panchayat.
+- The last digit represents **child** within household within ward within panchayat.
+
+This means that there are different panchayats in this dataset. Within each panchayat, we have different wards. Within each ward, we have different households. Within a household, they may have more than one child. Therefore, each child in this dataset has a specific id. 
+
+Here, we also need to convert the numeric to factor, because the **panchayat**, **ward**, **household** and **child** are categorical variables.
+
+```{r}
+mmod4<- lmer(wt ~ age + mage + (age|panchayat)
+             + (age|panchayat:ward)
+             + (age|panchayat:ward:household)
+             + (age|panchayat:ward:household:child), data = nepali_tidy)
+summary(mmod4)
+```
+
+From the summary of this nested mixed effects model, we can see that:
+
+- **child:** the variance between the child is 1.669. Since we also include a random slope with age in this model, the variance between the slopes of the age is 0.147;
+- **household:** the variance between the household is 0.0002; Since we also include a random slope with age in this model, the variance between the slopes of the age is 0.039;
+- **ward:** the variance between the ward is 0.035; Since we also include a random slope with age in this model, the variance between the slopes of the age is 0.005;
+- **panchayat:** the variance between the panchayat is 0.246; Since we also include a random slope with age in this model, the variance between the slopes of the age is 0.0002;
+- **residual:** the variance of the plain measurement error is 0.142.
+
+Here, we can find that the largest variation in the data is from the child. This means that there is a variation between the weight of individual holding other variable constant.
+
+```{r}
+ranef(mmod4) %>% as.tibble() %>% ggplot(aes(sample = condval)) + facet_wrap( ~ grpvar) + geom_qq()
+```
+
+From these graphs, we can also conclude that the largest variation is from the child. Then follows by panchayat and ward. The smallest variation is from the household.
+

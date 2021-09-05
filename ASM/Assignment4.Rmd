@@ -1,0 +1,174 @@
+---
+title: "Assignment4"
+author: "Yini Lai"
+date: "2019/10/16"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Q1
+
+```{r}
+library(readr)
+library(tidyverse)
+library(lubridate)
+library(mgcv)
+library(forecast)
+library(visreg)
+```
+
+```{r}
+rainfall <- read_csv("IDCJAC0009_31011_1800_Data.csv") %>% filter(Year >= 1991) %>% rename(rainfall_amount = `Rainfall amount (millimetres)`)
+rainfall_tidy <- rainfall %>% mutate(Month = as.numeric(Month), Day = as.numeric(Day))
+rainfall_tidy <- rainfall_tidy %>% mutate(Date = make_date(Year, Month, Day))
+```
+
+Read the historical daily rainfall data starting from 1991 for the Cairns weather station #31011. Then use the information "Year", "Month" and "Day" to create a new variable Date which incorporates "Year", "Month", "Day".  
+
+# Q2
+
+```{r}
+soi <- read.table("DailySOI1887-1989Base.txt",header = TRUE) 
+soi_tidy <- soi %>% mutate(Date = as.Date(paste(Year, "-01-01", sep = "")) + Day - 1)
+join <- inner_join(rainfall_tidy, soi_tidy, by = "Date")
+```
+
+Read the Southern Oscillation Index from the txt file. Use the "Year" and "Day" to create a new variable Date which indicates the corresponding date.
+Then use inner_join function to join the "rainfall_tidy" and "soi_tidy" datasets by "Date". In this way, we have the rainfall information and SOI information for the same days (from 1991-06-06 to 2018-10-21).
+
+# Q3
+
+```{r}
+# Create fourier terms using forecast's fourier function
+ft <- fourier(ts(rep(1, NROW(join)), frequency = 365.25),3)
+
+# Rename them, because GAM can't handle some column names
+colnames(ft) <- c("S1", "C1","S2","C2","S3","C3")
+
+# Add them to the dataset
+join <- join %>% cbind(ft)
+join <- join %>% mutate(Rain = as.factor(ifelse(rainfall_amount == 0, "N", "Y")))
+```
+
+First create the fourier terms and add them to the join dataset. Then create a new variable Rain based on the rainfall amount. This is a dummy variable which indicates whether it rained or not on that day.
+
+```{r}
+lmod <- gam(Rain ~ S1 + C1 + S2 + C2 + S3 + C3, family = binomial, data = join, na.action = na.exclude)
+summary(lmod)
+```
+
+Build a logistic GAM for modelling rainfall occurrence using only the time of year (Here, we use the fourier terms) as predictors. In this way, we can use this model to predict the probability of rain on day t.
+
+Plot predicted probability of rain $p_{t}$ for t = 1,...,365 in year 1992. 
+
+```{r}
+join <- join %>% mutate(predict = predict(lmod, type = "response")) 
+plot(join$Date[210:575], y = join$predict[210:575], main = 'Predicted probability of rain 1992', ylab = 'Probability of rain', xlab = 'Month')
+```
+
+Otherwise, we can also compute the average daily rainfall amount within the whole time period. 
+
+```{r}
+join %>% filter( Year.x>1991, Year.x< 2018) %>% group_by(Day.y) %>% summarise(m = mean(predict, na.rm = TRUE)) %>% ggplot(aes(x = Day.y, y = m)) + geom_line() + xlab("Day") + ylab("Predicted probability of rain") + labs(title = "Average predicted probability of rain")
+```
+
+From these graphs, we can see that in general, the probability of rain in one year is like a cycle. If we plot it for several years, it will be the continuous cycle. During June and November, it is less likely to rain compared with that for the period between December and May. This means that it is less likely to rain in autumn and winter with the lowest point occurring in September. It is more likely to rain in spring and summer with the highest point occurring in Feburary. 
+For the lowest point, there was around 25% probability of rain. For the highest point, there was about 65% probability of rain. 
+These are consistent with the climate in Cairns, since it experiences a tropical climate.
+
+# Q4
+
+```{r}
+lmod2 <- gam(Rain ~ S1 + C1 + S2 + C2 + S3 + C3 + s(SOI), family = binomial, data = join, na.action = na.exclude)
+summary(lmod2)
+```
+
+Include a smooth term in the GAM model for the daily SOI values.
+
+```{r}
+visreg(lmod2,"SOI", by = 'Rain', gg = TRUE, scale = "response")+ labs(title = "SOI vs Probability of Rain")
+```
+
+From the graph, we can see that as SOI increases, the probability of rain would also increase, although their relationship is non-linear. It also shows that the days with negative SOI have a low probability of rain (less than 40%) and the days with positive SOI have a high probability of rain (greater than 50%). These are consistent with the thought that rainfall occurrence is affected by the El Nino effect, and negative SOI indicates a reduction in rainfall over eastern and northern Australia, and positive SOI indicates a higher probability of rainfall in eastern and northern Australia.
+
+In terms of the confidence interval, we couldn't draw a flat line across the grey area which also indicates that there is a strong relationship between SOI and the probability of rain. The interval is narrow when SOI is around 0 and is wide when SOI is closed to or greater than 50, or closed to or less than -50. This maybe because there are more data with SOI ranges from -50 to 40, and less data with extreme SOI values.
+
+# Q5
+
+Include lagged values of the rainfall amount and occurrence in the model
+
+```{r}
+join <- join %>% mutate(amount_lag = lag(rainfall_amount,1))
+join <- join %>% mutate(rain_lag = lag(Rain,1))
+lmod3 <- gam(Rain ~ S1 + C1 + S2 + C2 + S3 + C3 + s(SOI) + s(amount_lag) + rain_lag, family = binomial, data = join, na.action = na.exclude)
+summary(lmod3)
+```
+
+```{r}
+visreg(lmod2,"SOI", gg = TRUE, scale = "response")+ labs(title = "SOI vs Rain (without lag)")
+visreg(lmod3,"SOI", gg = TRUE, scale = "response")+ labs(title = "SOI vs Rain (with lag)")
+```
+
+According to the regression result on Q4, the edf(effective degree of freedom) of the smooth term SOI is 2.313. This indicates that the relationship between SOI and the probability of rain is somewhat between quadratic and cubic. However, if we include lagged values of the rainfall amount and occurrence in the model, the edf of the smooth term SOI is 1.002, which is closed to linear. Therefore, if not consider the problem of serial correlation, the relationship between the probability of rain and SOI is more wiggly than that after addressing the serial correlation. 
+
+From the visreg graphs, we can also see that after adding the a lag for the rainfall amount and the occurrence, the influence of SOI on the probability of rain changes a bit. For lmod2, it seems that with different SOI, the predicted probability of rain has a range between 0.2 and 0.75. For lmod3, with different SOI, the predicted probability of rain ranges between 0.15 and 0.35. 
+
+In general, whether addressing the serial correlation problem or not, the relationship between SOI and the probability of rain are both positive.
+
+# Q6
+
+Fit a new model considering the interaction between yesterday's rainfall occurrence and the time of year. 
+
+```{r}
+lmod4 <- gam(Rain ~ s(SOI) + s(amount_lag) + rain_lag*(S1 + C1 + S2 + C2 + S3 + C3), family = binomial, data = join, na.action = na.exclude)
+summary(lmod4)
+```
+
+```{r}
+anova(lmod3,lmod4, test = "Chisq")
+```
+
+$H_{0}:$ Model with interaction is the same as model without interaction
+$H_{1}:$ Model with interaction is different from model without interaction.
+
+From the test result, we can see that the p value is much smaller than 0.05, which indicates that we should reject the null hypothesis and conclude that there are some difference between the model with interaction and the model without interaction. Therefore, the interaction between yesterday's rainfall occurrence and the time of the year is significant. Also, since the model with interaction contains more information, it is regarded as the better model. 
+
+# Q7
+
+```{r}
+lmod4 <- gam(Rain ~ s(SOI) + s(amount_lag) + rain_lag*(S1 + C1 + S2 + C2 + S3 + C3), family = binomial, data = join, na.action = na.exclude)
+summary(lmod4)
+lmod_linear <- gam(Rain ~ SOI + s(amount_lag) + rain_lag*(S1 + C1 + S2 + C2 + S3 + C3), family = binomial, data = join, na.action = na.exclude)
+summary(lmod_linear)
+anova(lmod_linear,lmod4, test = "Chisq")
+```
+
+First, in order to decide whether the SOI term is significant non-linear or not, we can look at the effective degree of freedom on the non-linear model. Here, the edf of smooth term SOI is 1.001, which is closed to 1. This may indicate that the relationship between SOI and probability of rain is likely to be linear. 
+
+Then we can do a test. Since the models follow binomial distribution, we should set test = "chisq" when using anova function.
+
+$H_{0}:$ The linear model (smaller) is the same as the non-linear model 
+$H_{1}:$ The linear model is different from the non-linear model
+
+From the test statistics, we can see that the p value is less than 0.05, which may indicate that we should reject the null hypothese and conclude that the relationship between SOI and probability of rain is non-linear. This is contradicted with the regression result. 
+
+However, we can also notice that:
+- The degree of freedom of the likelihood ratio test is equal to the difference in the number of parameters between the two models. In this case, it is 0.0041702.
+
+This degree of freedom is taken as the denominator when we do the test. Since it is close to 0(very small), it will end up with a large test statistics. In this way, it will be more likely to reject the null and conclude that the models are different. 
+
+As a result, we should believe that the relationship between SOI and the probability of rain is not siginificant non-linear.
+
+# Q8
+
+```{r}
+predict(lmod4, join %>% filter(Date == "2018-09-01"), se = TRUE, type = "response")
+```
+
+From the result, we can say that the probability of rain on 1 September 2018 is predicted to be 13.49906%
