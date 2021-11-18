@@ -1,0 +1,750 @@
+---
+title: "KPMG"
+author: "Yini Lai"
+date: "20/01/2021"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+    number_sections: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(knitr)
+library(tidyverse)
+library(readxl)
+library(visdat)
+library(scales)
+library(sjmisc)
+library(rfm)
+```
+
+# Introduction
+
+```{r}
+# Loading Data
+
+Transactions <- read_excel("~/Documents/Projects/KPMG/KPMG_VI_New_raw_data_update_final.xlsx", 
+    sheet = "Transactions", skip = 1)
+
+NewCustomerList <- read_excel("~/Documents/Projects/KPMG/KPMG_VI_New_raw_data_update_final.xlsx", 
+    sheet = "NewCustomerList", skip = 1)
+
+CustomerDemographic <- read_excel("~/Documents/Projects/KPMG/KPMG_VI_New_raw_data_update_final.xlsx", 
+    sheet = "CustomerDemographic", skip = 1)
+
+CustomerAdress <- read_excel("~/Documents/Projects/KPMG/KPMG_VI_New_raw_data_update_final.xlsx", 
+    sheet = "CustomerAddress", skip = 1)
+```
+
+,
+    col_types = c("text", "text", "text", "numeric", "numeric", "text", "text", "text","text", "text",
+                 "numeric", "text", "text", "text", "text", "numeric","numeric", "numeric","numeric",
+                 "numeric", "numeric", "numeric", "numeric")
+
+# Data Wrangling
+
+## Transactions
+
+### Accuracy
+
+Create a profit column is helpful in checking the data accuracy issue with standard cost and list_price as we can figure out whether there is a negative profit or some of the profits are lower than what we expected.
+
+```{r}
+Transactions <- Transactions %>% mutate(profits = list_price - standard_cost)
+```
+
+### Completeness
+
+```{r}
+vis_miss(Transactions)
+```
+
+Since there is not too many missing values (0.6%), we can directly remove them from the data set.
+
+```{r}
+Transactions <- na.omit(Transactions)
+```
+
+### Consistency, Relevancy, Validity
+ 
+Look at the data types within the transaction dataset.
+
+```{r}
+vis_dat(Transactions)
+```
+**Raw Data Types**
+
+**Character:** order_status, brand, product_line, product_class, product_size
+
+These variables are in the correct data type, but better to convert them to factor for further analysis.
+
+**Logical:** online_order
+
+Correct
+
+**Numeric:** transaction_id, product_id, customer_id, list_price, standard_cost, product_first_sold_date
+
+- transaction_id & product_id & customer_id: better to be presented in character format
+
+- list_price & standard_cost: should be presented in currency format **Validity**
+
+- product_first_sold_date: should be in date format **Validity**
+
+**POSIXct:** transaction_date
+
+Correct, can convert to date to keep consistent
+
+```{r}
+# Convert to factor for further analysis
+
+Transactions$order_status <- as.factor(Transactions$order_status)
+Transactions$brand <- as.factor(Transactions$brand)
+Transactions$product_line <- as.factor(Transactions$product_line)
+Transactions$product_class <- as.factor(Transactions$product_class)
+Transactions$product_size <- as.factor(Transactions$product_size)
+```
+
+```{r}
+# Convert transaction_id & product_id & customer_id to character
+
+Transactions$transaction_id <- as.character(Transactions$transaction_id)
+Transactions$product_id <- as.character(Transactions$product_id)
+Transactions$customer_id <- as.character(Transactions$customer_id)
+```
+
+```{r}
+# Validity
+
+# Convert list_price & standard_cost to currency format
+Transactions$list_price <- dollar_format()(c(Transactions$list_price ))
+Transactions$standard_cost <- dollar_format()(c(Transactions$standard_cost))
+```
+
+```{r}
+# Validity
+
+# Convert product_first_sold_date to Date format
+Transactions$product_first_sold_date <- as.Date(Transactions$product_first_sold_date, origin = "1899-12-30")
+```
+
+```{r}
+# Convert transaction_date to Date format
+Transactions$transaction_date <- as.Date(Transactions$transaction_date)
+```
+
+Summary the data to have a overview of the data set
+
+```{r}
+summary(Transactions)
+```
+
+From the summary result, we can see that there is no consistency issue since every element of each variable is recorded in the same way. However, there is a **relevancy** issue, since from the order_status, we can see that some of the orders had been canceled. Thus, we need to remove those canceled orders. 
+
+```{r}
+Transactions <- Transactions %>% filter(order_status == "Approved")
+```
+
+### Uniqueness
+
+```{r}
+Transactions_duplicate <- Transactions %>% data.frame() %>% distinct()
+```
+
+```{r}
+dim(Transactions)[1]
+dim(Transactions_duplicate)[1]
+```
+
+There is no duplicate rows in this dataset.
+
+## CustomerDemographic
+
+### Consistency, Relevancy, Validity
+
+```{r}
+vis_dat(CustomerDemographic)
+```
+
+Most of the variables in this dataset are in correct types except DOB which should be in date format.
+
+```{r}
+# Check whether there is any date like data in DOB column
+
+index <- c()
+for (i in 1:dim(CustomerDemographic)[1]) {
+  if(str_contains(CustomerDemographic$DOB[i], c("-"))){
+   index <- append(index, i)
+  }else next
+}
+
+CustomerDemographic[index, "DOB"]
+```
+
+It's a bit strange that a customer was born in 1843 in this case. Thus we can remove this row as it may be considered as an outlier. This is an **accuracy issue**.
+
+Except row 34, all the other values in column "DOB" are not in Date format. DOB should be in date format rather than character. 
+
+```{r}
+# Validity
+
+CustomerDemographic$DOB <- as.Date(as.numeric(CustomerDemographic$DOB), origin = "1899-12-30")
+```
+
+
+```{r}
+# Convert some the character format variables to factor for further analysis
+
+CustomerDemographic$gender <- as.factor(CustomerDemographic$gender)
+CustomerDemographic$job_title <- as.factor(CustomerDemographic$job_title)
+CustomerDemographic$job_industry_category <- as.factor(CustomerDemographic$job_industry_category)
+CustomerDemographic$wealth_segment <- as.factor(CustomerDemographic$wealth_segment)
+CustomerDemographic$deceased_indicator <- as.factor(CustomerDemographic$deceased_indicator)
+CustomerDemographic$owns_car <- as.factor(CustomerDemographic$owns_car)
+```
+
+```{r}
+head(CustomerDemographic)
+summary(CustomerDemographic)
+```
+
+From the summary, we can see that for gender column, there are three ways in recording female. Thus we should make some adjustment on them to keep consistent.
+
+```{r}
+# Consistency issue in Gender column
+
+CustomerDemographic <- CustomerDemographic %>%
+  mutate(gender = case_when(
+    gender == 'F' ~ 'Female',
+    gender == 'Femal' ~ 'Female',
+    gender == 'Female' ~ 'Female',
+    gender == 'M' ~ 'Male',
+    gender == 'Male' ~ 'Male',
+    gender == 'U' ~ 'U'
+  ))
+CustomerDemographic$gender <- as.factor(CustomerDemographic$gender)
+```
+
+May also need to investigate variable job_title and job_industry_category
+
+```{r}
+unique(CustomerDemographic$job_title)
+unique(CustomerDemographic$job_industry_category)
+```
+
+For these two variables, better to make a list which contains the most common job titles and most common job industry categories. For those rare job titles and job industry categories, we can add another option named "other". In this way, we can better classify and also avoid writing the same category into different ways.
+
+From the first table which includes the first 6 rows of the data set, we can see that the default column contains irrelevant information. Thus, we can get rid of this column.
+
+```{r}
+# Relevancy
+
+CustomerDemographic <- CustomerDemographic %>% select(c(-default))
+```
+
+### Currency
+
+From the summary table, we can see that there were two customers deceased. Thus their information should be removed from the data set.
+
+```{r}
+CustomerDemographic <- CustomerDemographic %>% filter(CustomerDemographic$deceased_indicator == "N")
+```
+
+
+### Accuracy
+
+From the summary table, we can see that most of the categorical variables seems reasonable. However, since the dataset only records Date of Birth, it is hard to figure out whether there are any outliers in this column. Except the row with DOB "1843-12-21" which had been considered as an outlier and should be excluded from the table. We need to further investigate the other DOB value. Thus it is better to create a new variable 'age' which is helpful in detecting outliers.
+
+```{r}
+CustomerDemographic <- CustomerDemographic %>% mutate(Age = round((Sys.Date() - DOB)/365,2))
+```
+
+```{r}
+summary(as.numeric(CustomerDemographic$Age))
+```
+
+The range of age seems reasonable. The youngest one is nearly 19-year-old and the oldest one is nearly 90-year-old.
+
+Recommendation: Create an Age column.
+
+### Completeness
+
+```{r}
+vis_miss(CustomerDemographic)
+```
+
+From the summary table above, we can see that there are 656 "n/a" values in job_industry_category column. Since it takes a large proportion of the "job_industry_category" column, we may keep it for further analysis.
+
+From the graph, we can see that there are 1.7 % missing value in this data set. The following columns contain missing values:
+
+- last_name
+- DOB
+- job_title
+- tenure
+- Age
+
+However, since we can distinguish the customer from their customer_id, we don't have to remove those observations with missing value in last_name column as this does not influence our analysis.
+
+To mitigate this issue, we need to remove the observations that contain missing information.
+
+```{r}
+CustomerDemographic <- CustomerDemographic[complete.cases(CustomerDemographic[, -c(3)]),]
+```
+
+Better to impute the missing value with some algorithms.
+
+### Uniqueness
+
+```{r}
+CustomerDemographic_duplicate <- CustomerDemographic %>% data.frame() %>% distinct()
+```
+
+```{r}
+dim(CustomerDemographic)[1]
+dim(CustomerDemographic_duplicate)[1]
+```
+
+## CustomerAddress
+
+### Consistency, Relevancy, Validity
+
+```{r}
+vis_dat(CustomerAdress)
+```
+
+There is no obvious data type issue (or validity issue) in this dataset.
+
+```{r}
+# Data type transformation for further investigation
+CustomerAdress$state <- as.factor(CustomerAdress$state)
+CustomerAdress$country <- as.factor(CustomerAdress$country)
+CustomerAdress$postcode <- as.factor(CustomerAdress$postcode)
+```
+
+```{r}
+head(CustomerAdress)
+summary(CustomerAdress)
+```
+
+From the summary table, we can see that one of the states was recorded with abbreviation and some of the states were recorded with both full name and abbreviation. Thus the consistency issue exists.
+
+```{r}
+CustomerAdress <- CustomerAdress %>%
+  mutate(state = case_when(
+    state == 'New South Wales' ~ 'NSW',
+    state == 'NSW' ~ 'NSW',
+    state == 'QLD' ~ 'QLD',
+    state == 'VIC' ~ 'VIC',
+    state == 'Victoria' ~ 'VIC'
+  ))
+CustomerAdress$state <- as.factor(CustomerAdress$state)
+```
+
+### Accuracy
+
+From the summary table showing above, it seems there is no outlier in this dataset.
+
+### Completeness
+
+```{r}
+vis_miss(CustomerAdress)
+```
+
+There is no missing value in this dataset
+
+### Uniqueness
+
+```{r}
+CustomerAdress_duplicate <- CustomerAdress %>% data.frame() %>% distinct()
+```
+
+```{r}
+dim(CustomerAdress)[1]
+dim(CustomerAdress_duplicate)[1]
+```
+
+## Relation among three data sets.
+
+```{r}
+Transactions$customer_id <- as.factor(Transactions$customer_id)
+CustomerDemographic$customer_id <- as.factor(CustomerDemographic$customer_id)
+CustomerAdress$customer_id <- as.factor(CustomerAdress$customer_id )
+```
+
+```{r}
+join_data <- Transactions %>% inner_join(CustomerDemographic, by = "customer_id") %>% inner_join(CustomerAdress, by = "customer_id")
+```
+
+```{r}
+full_data <- Transactions %>% full_join(CustomerDemographic, by = "customer_id") %>% full_join(CustomerAdress, by = "customer_id")
+```
+
+```{r}
+Transaction_customer <- list(unique(Transactions$customer_id))
+CustomerDemographic_customer <- list(unique(CustomerDemographic$customer_id))
+CustomerAdress_customer <- list(unique(CustomerAdress$customer_id))
+full_customer <- list(unique(full_data$customer_id))
+```
+
+```{r}
+lengths(list(unique(join_data$customer_id)))
+lengths(full_customer)
+lengths(Transaction_customer)
+lengths(CustomerDemographic_customer)
+lengths(CustomerAdress_customer)
+```
+
+```{r}
+all(full_customer %in% Transaction_customer)
+all(full_customer %in% CustomerDemographic_customer)
+all(full_customer %in% CustomerAdress_customer)
+```
+
+Only 2992 customers had completed information being recorded and none of the three datasets contains all the existed customer_id. However, this is not an issue for Transactions dataset as some of the customers may not have any transactions in the past 3 months. But this can be an issue for both "CustomerDemographic" and "CustomerAdress". Thus customer_id is incompleted in these two data set.
+
+# Data Exploration
+
+```{r}
+join_data <- join_data %>% mutate(recency = (Sys.Date() - transaction_date))
+join_data <- join_data %>% group_by(customer_id) %>% mutate(frequency = n())
+join_data <- join_data %>% group_by(customer_id) %>% mutate(recency = min(recency))
+join_data <- join_data %>% group_by(customer_id) %>% mutate(total_profit = sum(profits))
+```
+
+online_order
+brand
+gender
+past_3_years_bike_related_purchased
+job_title
+job_industry_category
+wealth_segment
+owns_car
+Age
+postcode
+state
+
+# Main effects
+
+```{r}
+ggplot(data = join_data) +
+  geom_bar(mapping = aes(x = as.factor(online_order)), fill = "dodgerblue4")+
+  theme_minimal()
+```
+
+```{r}
+ggplot(data = join_data) +
+  geom_bar(mapping = aes(x = brand), fill = "dodgerblue4")+
+  theme_minimal()
+```
+
+```{r}
+join_data %>% select(c(customer_id, gender)) %>% unique() %>% ggplot() +
+  geom_bar(mapping = aes(x = gender), fill = "dodgerblue4")+
+  theme_minimal()
+```
+
+```{r}
+bar <- join_data %>% select(c(customer_id, job_industry_category)) %>% unique() %>% ggplot() +
+  geom_bar(mapping = aes(x = job_industry_category), fill = "dodgerblue4")+
+  theme_minimal() +
+  ggtitle("Distribution of job_industry_category (existing customers)")
+bar + coord_flip()
+```
+
+```{r}
+join_data %>% select(c(customer_id, wealth_segment)) %>% unique() %>% ggplot() +
+  geom_bar(mapping = aes(x = wealth_segment), fill = "dodgerblue4")+
+  theme_minimal()
+```
+
+```{r}
+join_data %>% select(c(customer_id, state)) %>% unique() %>% ggplot() +
+  geom_bar(mapping = aes(x = state), fill = "dodgerblue4")+
+  ggtitle("Distribution of customers in different states (existing customers)") +
+  theme_minimal()
+```
+
+```{r}
+join_data %>% select(c(customer_id, Age)) %>% unique() %>% ggplot() +
+  geom_histogram(mapping = aes(x = Age), fill = "dodgerblue4")+
+  theme_minimal()
+```
+
+```{r}
+join_data %>% select(c(customer_id, past_3_years_bike_related_purchases)) %>% unique() %>% ggplot() +
+  geom_histogram(mapping = aes(x = past_3_years_bike_related_purchases), fill = "dodgerblue4")+
+  theme_minimal()
+```
+
+# Relationship
+
+```{r}
+join_data %>% select(c(customer_id, gender, past_3_years_bike_related_purchases)) %>% unique() %>% 
+  ggplot(aes(x = past_3_years_bike_related_purchases, fill = gender)) +
+  geom_histogram(binwidth = 10) +
+  facet_grid(~gender)+
+  scale_fill_brewer(palette = "Paired") +
+  ggtitle("Distribution of past_3_years_bike_related_purchases by Gender (existing)") +
+  theme_minimal()
+```
+
+```{r}
+join_data %>% select(c(customer_id, owns_car, state)) %>% unique() %>% 
+  ggplot(aes(x = state, fill = owns_car)) +
+  geom_bar(position = "dodge")+
+  scale_fill_brewer(palette = "Paired") +
+  ggtitle("Distribution of customers in different states by car owning (existing customers)") +
+  theme_minimal()
+```
+
+```{r}
+join_data %>% select(c(customer_id, Age, wealth_segment)) %>% unique() %>% ggplot() +
+  geom_histogram(mapping = aes(x = Age, fill = wealth_segment), position = "fill", binwidth = 10)+
+  scale_fill_brewer(palette = "Paired") +
+  ggtitle("Distribution of Age by Wealth_Segment (existing customers)") +
+  theme_minimal()
+```
+
+## test
+
+```{r}
+rfm_data <- data.frame(cbind(as.character(join_data$customer_id), join_data$transaction_date, join_data$total_profit))
+
+rfm_data <- rfm_data %>% rename(customer_id = "X1")
+
+rfm_data <- rfm_data %>% rename(transactions_date = "X2")
+
+rfm_data <- rfm_data %>% rename(total_profit = "X3")
+
+rfm_data$transactions_date <- as.Date(as.numeric(rfm_data$transactions_date), origin = "1970-01-01")
+
+rfm_data$total_profit <- as.numeric(rfm_data$total_profit)
+
+rfm_data <- distinct(rfm_data)
+
+rfm_result <- rfm_table_order(rfm_data, customer_id, transactions_date, total_profit, Sys.Date())
+
+rfm_result
+```
+
+```{r}
+rfm_heatmap(rfm_result)
+```
+
+```{r}
+rfm_bar_chart(rfm_result)
+```
+
+```{r}
+rfm_histograms(rfm_result)
+```
+
+```{r}
+rfm_order_dist(rfm_result)
+```
+
+```{r}
+rfm_rm_plot(rfm_result)
+```
+
+```{r}
+rfm_fm_plot(rfm_result)
+```
+
+```{r}
+rfm_rf_plot(rfm_result)
+```
+
+```{r}
+rfm_data <- rfm_data %>% select(-c('transactions_date'))
+recency_score <- rfm_result %>% pull(rfm) %>% pull(recency_score)
+frequency_score <- rfm_result %>% pull(rfm) %>% pull(frequency_score)
+monetary_score <- rfm_result %>% pull(rfm) %>% pull(monetary_score)
+rfm_score <- rfm_result %>% pull(rfm) %>% pull(rfm_score)
+customer_id <- rfm_result %>% pull(rfm) %>% pull(customer_id)
+rfm_info <- cbind.data.frame(customer_id, rfm_score, recency_score, frequency_score, monetary_score)
+```
+
+```{r}
+rfm_info <- rfm_info %>% 
+  mutate(segment = case_when(recency_score >= 4 & frequency_score >= 4 & monetary_score >= 4 ~ 'Champions',
+         recency_score >= 3 & frequency_score >= 3 & monetary_score >= 2 ~ 'Loyal Customers',
+         recency_score >= 3 & 3 >= frequency_score & frequency_score >= 1 &
+           4 >= monetary_score  & monetary_score >= 1 ~ 'Potential Loyalist',
+         recency_score >= 4 & frequency_score <= 1 & monetary_score <= 1 ~ 'New Customers',
+         4 >= recency_score & recency_score >= 3 & frequency_score <= 1 &
+           monetary_score <= 1 ~ 'Promising',
+         3 >= recency_score & recency_score >= 2 & 3 >= frequency_score &  frequency_score >= 1 &
+           4 >= monetary_score & monetary_score >= 2 ~ 'Need Attention',
+         3 >= recency_score & recency_score >= 2 & frequency_score <= 2 &
+           monetary_score <= 2 ~ 'About To Sleep',
+         recency_score <= 2 & 5 >= frequency_score & frequency_score >= 2 &
+           5 >= monetary_score  & monetary_score >= 1 ~ 'At Risk',
+         recency_score <= 1 & 5 >= frequency_score & frequency_score >= 4 &
+           5 >= monetary_score & monetary_score >= 4 ~ 'Can’t Lose Them',
+         2 >= recency_score & recency_score >= 1 &
+           3 >= frequency_score & frequency_score >= 1 & 
+           3 >= monetary_score & monetary_score >= 1 ~ 'Hibernating',
+         recency_score <= 2 & frequency_score <= 2 & monetary_score <= 2 ~ 'Lost'))
+```
+
+
+```{r}
+rfm_data <- rfm_data %>% full_join(rfm_info)
+customer_info <- cbind.data.frame(join_data$customer_id, join_data$gender,
+                                  join_data$past_3_years_bike_related_purchases, 
+                                                join_data$job_industry_category, 
+                                  join_data$wealth_segment, join_data$owns_car, join_data$tenure,
+                                                join_data$postcode, join_data$state, 
+                                  join_data$property_valuation, join_data$Age,
+                                  join_data$recency, join_data$frequency, join_data$total_profit)
+
+customer_info <- customer_info %>% rename(customer_id = 'join_data$customer_id')
+customer_info <- customer_info %>% rename(gender = 'join_data$gender')
+customer_info <- customer_info %>% rename(past_3_years_bike_related_purchases =
+                                            'join_data$past_3_years_bike_related_purchases')
+customer_info <- customer_info %>% rename(job_industry_category = 'join_data$job_industry_category')
+customer_info <- customer_info %>% rename(wealth_segment = 'join_data$wealth_segment')
+customer_info <- customer_info %>% rename(owns_car = 'join_data$owns_car')
+customer_info <- customer_info %>% rename(tenurer = 'join_data$tenure')
+customer_info <- customer_info %>% rename(postcode = 'join_data$postcode')
+customer_info <- customer_info %>% rename(state = 'join_data$state')
+customer_info <- customer_info %>% rename(property_valuation = 'join_data$property_valuation')
+customer_info <- customer_info %>% rename(age = 'join_data$Age')
+customer_info <- customer_info %>% rename(transaction_count = 'join_data$frequency')
+customer_info <- customer_info %>% rename(recency_days = 'join_data$recency')
+customer_info <- customer_info %>% rename(amount = 'join_data$total_profit')
+
+rfm_data <- rfm_data %>% inner_join(customer_info)
+rfm_data <- distinct(rfm_data)
+```
+
+
+```{r}
+rfm_plot_median_recency(rfm_data)
+rfm_plot_median_frequency(rfm_data)
+rfm_plot_median_monetary(rfm_data)
+```
+
+```{r}
+rfm_data %>% mutate(segment = reorder(segment, desc(rfm_score))) %>% ggplot() +
+  geom_bar(mapping = aes(x = segment), fill = "dodgerblue4")+
+  ggtitle("Distribution of customers in different segments") +
+  theme_minimal()
+```
+
+```{r}
+reorder <- rfm_data %>% select(segment, rfm_score)  %>% group_by(segment) %>% count()
+reorder
+```
+
+
+```{r}
+rfm_data %>% ggplot(aes(x = gender, y = rfm_score)) + geom_boxplot()
+```
+
+```{r}
+rfm_data %>% ggplot(aes(x = job_industry_category, y = rfm_score)) + geom_boxplot() + coord_flip()
+```
+
+```{r}
+rfm_data %>% ggplot(aes(x = wealth_segment, y = rfm_score)) + geom_boxplot()
+```
+
+```{r}
+rfm_data %>% ggplot(aes(x = state, y = rfm_score)) + geom_boxplot()
+```
+
+```{r}
+rfm_data %>% ggplot(aes(x = past_3_years_bike_related_purchases, y = rfm_score)) + 
+  geom_point() + geom_smooth()
+```
+
+```{r}
+rfm_data %>% ggplot(aes(x = age, y = rfm_score)) + geom_point() + geom_smooth()
+```
+
+# Tidy new data set
+
+```{r}
+summary(NewCustomerList)
+```
+
+```{r}
+vis_miss(NewCustomerList)
+```
+
+```{r}
+NewCustomerList$gender <- as.factor(NewCustomerList$gender)
+NewCustomerList$past_3_years_bike_related_purchases <- as.numeric(NewCustomerList$past_3_years_bike_related_purchases)
+
+# *may lose some data
+NewCustomerList$DOB <- as.Date(NewCustomerList$DOB, origin = "1970-01-01")
+```
+
+```{r}
+NewCustomerList$age <- round((Sys.Date() - NewCustomerList$DOB)/365,2)
+```
+
+```{r}
+NewCustomerList %>% select(c(first_name, last_name, age)) %>% unique() %>% ggplot() +
+  geom_histogram(mapping = aes(x = age), fill = "dodgerblue4")+
+  theme_minimal()
+```
+
+```{r}
+NewCustomerList %>% select(c(first_name, last_name, gender)) %>% unique() %>% ggplot() +
+  geom_bar(mapping = aes(x = gender), fill = "dodgerblue4")+
+  theme_minimal()
+```
+
+```{r}
+bar1 <- NewCustomerList %>% select(c(first_name, last_name, job_industry_category)) %>% unique() %>% ggplot() +
+  geom_bar(mapping = aes(x = job_industry_category), fill = "dodgerblue4")+
+  theme_minimal() +
+  ggtitle("Distribution of job_industry_category (new customers)")
+bar1 + coord_flip()
+```
+
+```{r}
+NewCustomerList %>% select(c(first_name, last_name, age, wealth_segment)) %>% unique() %>% ggplot() +
+  geom_histogram(mapping = aes(x = age, fill = wealth_segment), position = "fill", binwidth = 10) +
+  scale_fill_brewer(palette = "Paired") +
+  ggtitle("Distribution of Age by Wealth_Segment (new customers)") +
+  theme_minimal()
+```
+
+```{r}
+NewCustomerList %>% select(c(first_name, last_name, owns_car, state)) %>% unique() %>% 
+  ggplot(aes(x = state, fill = owns_car)) +
+  geom_bar(position = "dodge")+
+  scale_fill_brewer(palette = "Paired") +
+  ggtitle("Distribution of customers in different states by car owning (new customers)") +
+  theme_minimal()
+```
+
+```{r}
+NewCustomerList %>% select(c(first_name, last_name, gender, past_3_years_bike_related_purchases)) %>% unique() %>% 
+  ggplot(aes(x = past_3_years_bike_related_purchases, fill = gender)) +
+  geom_histogram(binwidth = 10) +
+  facet_grid(~gender)+
+  scale_fill_brewer(palette = "Paired") +
+  ggtitle("Distribution of past_3_years_bike_related_purchases by Gender (new)") +
+  theme_minimal()
+```
+
+```{r}
+write.xlsx(rfm_data, file = "rfm_data.xlsx")
+```
+
+
+
+
